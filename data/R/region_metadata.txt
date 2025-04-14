@@ -1,0 +1,11 @@
+Name	Pop	Region
+Chukchi Sea	Chukchi	West Arctic
+Coronation Gulf	Coronation	West Arctic
+Pond Inlet	Pond	East Arctic
+Broughton Island	Broughton	East Arctic
+Southeast Baffin (EAZ)	SEBaffin	Southeast Nunavut
+Frobisher Bay	Frobisher	Southeast Nunavut
+Hudson Strait (WAZ)	Hudson	Southeast Nunavut
+Southhampton Island	Southhampton	Southeast Nunavut
+
+

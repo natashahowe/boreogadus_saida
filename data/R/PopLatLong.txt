@@ -1,0 +1,12 @@
+Pond Inlet	72.6601	-79.2377
+Broughton	67.5905	-63.587
+Frobisher Bay	63.0714	-66.714958
+SE Baffin Island	66.0347	-61.2705
+Labrador Sea	57.9013	-59.8065
+Hudson Strait	62.142	-69.1427
+Southhampton Island	64.5319	-83.8164
+Coronation Gulf	68.3392	-113.9501
+Chukchi Sea	72.0015	-160.47
+Iceland	65.5793	-28.1558
+
+

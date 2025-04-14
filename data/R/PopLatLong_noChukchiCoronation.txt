@@ -1,0 +1,10 @@
+Pond	72.6601	-79.2377
+Broughton	67.5905	-63.587
+Frobisher	63.0714	-71.3192
+SEBaffin	66.0347	-61.2705
+Labrador	57.9013	-59.8065
+Hudson	62.142	-69.1427
+Southhampton	64.5319	-83.8164
+Iceland	65.5793	-28.1558
+
+

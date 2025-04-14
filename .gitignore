@@ -9,6 +9,30 @@
 # User-specific files
 .Ruserdata
 
+# large & uncompatible files
+*.xlsx
+*.sites
+*.gz
+*.gff
+*.jpg
+*.jpeg
+*.pdf
+*.docx
+*.pptx
+*.tiff
+**/pca/
+**/fst/
+**/beagle/
+**/geno/
+**/ld/
+**/ibs/
+**/figures/
+**/results/
+**/results/gtseq/
+**/map/
+Bib/
+**/old/
+
 # Example code in package build process
 *-Ex.R
 

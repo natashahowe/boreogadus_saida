@@ -1,0 +1,460 @@
+---
+title: "Boreogadus Saida (Arctic Cod) - Alaska/Canada"
+author: "Natasha Howe"
+date: "April 2025"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#load libraries
+library(tidyverse)
+
+```
+
+EXPLANATION OF PRIOR WORK
+
+### OUT OF ORDER WORK
+
+LD Pruning:
+
+```{bash, ld_pruning, eval=F, echo=T}
+sbatch scripts/boreogadus_peak_ld_pruning.sh -d /home/nhowe/arctic -k scripts/chr1-3_peak_input.txt -b boreogadus_wholegenome_20241222.beagle.gz -f /figures/ -p boreogadus -m boreogadus_filtered_downsampled_bamslist.txt -l no
+```
+
+# Project Template - Not Filled Out
+
+## Introduction
+
+EXPLANATION OF PROJECT
+
+## Sample Collection
+
+LIST POPULATIONS, MAKE TABLE?
+
+```{r MetaData, eval=F, echo=T}
+
+# All samples and sequencing information.
+read.csv("./data/raw/METADATA.csv")
+```
+
+## Whole Genome Sequencing
+
+EXPLANATION OF LAB WORK AND SEQUENCING EFFORTS
+
+## Data Analysis Pipeline
+
+Some resources came from the lcWGS analysis pipeline was developed by
+Laura Timm (<https://github.com/letimm/WGSfqs-to-genolikelihoods>) based
+on guides from Dr. Nina Therkildsen lab. The pipeline is undergoing
+iterative updates on the AFSC ABL github repository
+(<https://github.com/AFSC-Genetics/lcWGS-pipeline>) which is currently
+not public, but will become so when there is a stable version of the
+pipeline.
+
+### Access to Fastq Files
+
+WHERE DID DATA COME FROM
+
+Uploaded to Matt's analysis computer.
+
+```{bash SEDNA_Txfr, eval=F, echo=T}
+#transfer
+
+#MD5SUM after transfer
+
+nohup md5sum -c seqmatic_fastq_md5.sum > NOA002_seqmatic_sedna.md5out
+```
+
+Then create a file with a list of all the fastq files and their paths,
+which will be referenced in lcWGS_boreogadus_config.txt.
+
+```{bash FqFilePaths, eval=F, echo = T}
+cd ../../scratch2/nhowe/runtiming/boreogadus
+
+ls -d $PWD/*_R*.fq.gz > boreogadus_fastqs.txt
+
+# move to project folder
+cp boreogadus_fastqs.txt ~/runtiming/boreogadus/scripts/
+```
+
+In this project, I had a folder for each population, which was
+unnecessary. Therefore, I did this in each pop folder and then combined.
+
+### Step 0: Setup
+
+```         
+IF THIS IS FIRST TIME USING THE PIPELINE:
+SETUP VIRTUAL ENVIRONMENT AND DOWNLOAD MULTIQC VERSION 1.14!!
+NEWER VERSIONS OF MULTIQC WONT RUN ON PYTHON VERSIONS < 3.8
+```
+
+```{bash PipInstall, eval=T, echo=T}
+pip install multiqc==1.14
+```
+
+The first thing we need to do is download a reference genome and move it
+over to sedna so that we can align our data. We are using the Arctic cod
+(*boreogadus saida*) reference genome.
+
+```         
+GCA_964260565.1
+```
+
+With reference genome in hand (ncbi_dataset.zip) Unzip it locally to a
+directory named ./Ref_genomes/boreogadus.
+
+```{bash Unzip, eval=F, echo=T}
+unzip ncbi_dataset.zip -d ./Ref_genomes/boreogadus
+```
+
+Then copied just the fna file to sedna
+
+```{bash Trsfr_chr, eval=F, echo=T}
+scp ./chromosomes.txt user.name@161.55.52.157:./runtiming/boreogadus
+```
+
+This puts the actual reference genome down a few directories. You may
+have downloaded the RefSeq (GCA), GenBank (GCF), or both formats.
+Dealing with the GCF file is slightly easier down the line if you want
+to read the genome into memory.
+
+We can make a list of chromosomes by using a few commands in the
+terminal. All the chromosome lines start with NC, so we can use grep to
+find lines that start with (\^) the characters '\>NC' and pass those
+lines to awk to print the first column (\$1) and pass that to sed to
+remove the character '\>' that begins each line. We should have a text
+file with all the chromosome names.
+
+```{bash Chromosomes, eval=F, echo=T}
+grep '^>NC' ./home/nhowe/reference_genomes/boreogadus/GCF_023373465.1_Oket_V2_genomic.fna |  awk '{print $1}' | sed 's/>//' > chromosomes_all.txt
+```
+
+boreogadus have 37 chromosomes + 1 mtDNA. LRRC9 is on Chr 35.
+
+Note that if you use the Genbank file you will have to replace NC with
+CM in the grep argument. Sometimes the mitochondrial genome is not
+present in the GCA file but is in the GCF file so you may have to omit
+it from our list of chromosomes to analyze.
+
+```{r RmMtDNA, eval=F, echo=T}
+sed '/NC_017838.1/d' chromosomes_all.txt > chromosomes.txt
+```
+
+Let's take a quick look
+
+```{bash ChromHead, eval=T, echo=T}
+vim chromosomes.txt 
+```
+
+We second need to create a config file (lcWGS_boreogadus_config.txt)
+that will be passed to all of the python scripts to create the slurm
+control files (.sh files) that we will run with bash command. This tab
+delim file has a single line with a few parameters (mostly file paths)
+for the pipeline such as the fastqs, adapter sequence, chromosomes,
+reference genome, working directory. It also has a place to define a run
+prefix and an email for job updates from the SLURM manage. Do not
+include an underscore in your prefix!!
+
+```{bash ConfigFile, eval=T, echo = T}
+vim lcWGS_boreogadus_config.txt
+```
+
+Now that all that is done, we can start running the python scripts that
+are part of the pipeline. The first script checking for required inputs,
+generates some directories to house scripts and output, creates a
+checkpoint file (boreogadus.ckpt) that keeps track of where we are in
+the pipeline.
+
+So we can run the python script with
+
+```{bash, Step0_Configure, eval=F, echo=T}
+python3 lcWGSpipeline_step0-configure.py -c lcWGS_boreogadus_config.txt
+```
+
+which outputs two shell files bwa-index_script.sh and fai_script.sh.
+These two files do not need to finish before proceeding to step 1 of the
+pipeline. Get size of chromosomes
+
+```{bash ChromHead, eval=T, echo=T}
+ cut -f1,2 GCF_006149115.2_Oner_1.1_genomic.fna.fai | grep '^NC' > chrom_sizes.txt
+```
+
+```{bash, Step0_bwa_fai, eval=F, echo=T}
+./GCF_006149115.2_Oner_1.1_genomic_bwa-index_script.sh
+./GCF_006149115.2_Oner_1.1_genomic_fai_script.sh
+```
+
+### Step 1: Quality Control
+
+This step is a quality control of the sequencing data (raw fastqs). It
+runs FastQC [@Andrews2010] on the raw sequence data. FastQC is a java
+based application that runs a set of quality control measures and
+
+-   Import data from BAM, SAM or FastQ files (any variant)
+-   Provides a quick overview indicating in which areas there may be
+    problems
+-   Summary graphs and tables to quickly assess data quality
+-   Export of results to an HTML based permanent report
+-   Offline operation to allow automated generation of reports without
+    running the interactive application
+
+The shell scripts can be created with the python script step1-fastqc
+with the command
+
+```{bash, Step1, eval=F, echo=T}
+python3 lcWGSpipeline_step1-qc.py -p boreogadus.ckpt
+```
+
+passing the checkpoint file with the -p flag. The output of this script
+is two shell scripts boreogadus-raw_fastqcARRAY.sh and
+boreogadus-raw_multiqcSLURM.sh. These two scripts must be run in
+succession.
+
+```{bash, Step1_fastqc, eval=F, echo = T}
+./boreogadus-raw_fastqcARRAY.sh
+```
+
+```{bash, Step1_multiqc, eval=F, echo = T}
+./boreogadus-raw_multiqcSLURM.sh
+```
+
+### Step 2: Trim
+
+Step 2 of the pipeline trims adapters from raw fastqs with the program
+TRIMMOMATIC [@Bolger2014] and quality-checks the trimmed fastqs with
+multiQC [@Ewels2016]. The following python script outputs three shell
+scripts boreogadus_trimARRAY.sh, boreogadus-trim_fastqcARRAY.sh, and
+boreogadus-trim_multiqcSLURM.sh which should all be run one after the
+other.
+
+```{bash, Step2_Trim, eval=F, echo=T}
+python3 lcWGSpipeline_step2-trim.py -p boreogadus.ckpt
+```
+
+```{bash, Step2_trim, eval=F, echo = T}
+./boreogadus_trimARRAY.sh
+```
+
+```{bash, Step2_trim_fastqc, eval=F, echo = T}
+./boreogadus-trim_fastqcARRAY.sh
+```
+
+```{bash, Step2_trim_multiqc, eval=F, echo=T}
+./boreogadus-trim_multiqcSLURM.sh
+```
+
+It is advisable to download the multiQC.html file and evaluate the data
+quality before proceeding.
+
+### Step 3: Align
+
+Step 3 aligns reads to the reference genome that we downloaded with BWA
+and runs the aligned reads through SAMTOOLS [@Li2009]: 'fixmate' cleans
+up the read pairings and flags from BWA; a pair of 'view' statements
+converts the .sam file to a .bam file and filters the .bam file for
+non-unique and poor quality mappings; and 'sort' sorts the read pairings
+by coordinate (instead of read name). After a .bam file is built,
+duplicate reads are removed and (if the data is PE) overlapping reads
+are clipped to generate the final .bam.
+
+```{bash, Step3_Align, eval=F, echo=T}
+python3 lcWGSpipeline_step3-align.py -p boreogadus.ckpt
+```
+
+```{bash, Step3_align, eval=F, echo=T}
+./boreogadus_alignARRAY.sh
+```
+
+```{bash, Step3_depths, eval=F, echo=T}
+./boreogadus_depthsARRAY.sh
+```
+
+There is an output file boreogadus_depths.csv which we can import and
+run through the downsampling script to see if there is uneven
+distribution of depths across early and late individuals. The depth of
+these samples were quite low, and we didn't even use a cutoff because
+the two individuals that were less than 0.5x were in the 0.4s.
+
+```{R, plotDepths, eval=F, echo=T}
+downsampling_boreogadus.R
+```
+
+##### Mapped Reads
+
+Calculate the total number of mapped reads from the bamfiles with
+samtools.
+
+```{bash, mappedReads, eval=F, echo=T}
+./boreogadus_mapped_reads.sh
+```
+
+Now calculate the average and standard deviation for the mapped reads.
+
+```{r, mapped_reads, eval=F, echo=T}
+mean(read.csv("./results/depth/boreogadus_mapped_reads.csv", header = F)$V1)
+sd(read.csv("./results/depth/boreogadus_mapped_reads.csv", header = F)$V1)
+```
+
+### Step 4: Genotype Likelihoods
+
+There is a batch effect in these data. Need to make sure that the
+filters remove that batch effect.
+
+Calculates genotype likelihoods for putatively polymorphic sites and all
+sites. This is done on a chrom-by-chrom level using an array.
+
+```{bash, Step4-GenoLikelihoods, eval=F, echo=T}
+python3 lcWGSpipeline_step4-data.py -p boreogadus.ckpt -b boreogadus_blocklist_none.txt
+```
+
+Both of these scripts use boreogadus_angsdARRAY_input.txt (array file
+with chromosomes) and a list of the bam files to analyze (non-blocklist
+files -filtered_bamslist.txt).
+
+```{bash, Step4_LikelihoodCalc, eval=F, echo=T}
+# did not run globalArray
+# cp output and create new output with specified filters tomorrow
+cp boreogadus_polymorphicARRAY.sh boreogadus_minInd0.3_glsARRAY.sh
+./boreogadus_minInd0.3_glsARRAY.sh
+```
+
+For calculating the genotype likelihoods we are making some implicit
+decisions by running the canned pipeline script:
+
+-   *minMapQ* [20]: the minimum map quality is 20. If a different
+    mapping algorithm is used this value should be reassessed.
+-   *C* [50]: use an adjustment of the Map Quality for excessive
+    mismatches of 50. This is the suggested value for BWA and leads to
+    fewer false positive variant calls
+-   *minDepth* [48]: the minimum depth is set to half the number of
+    individuals in the dataset. Discard site if total sequencing depth
+    (all individuals added together) is below 0.5\*sample size.
+-   *setMaxDepth* [960]: maximum depth is set to the number of
+    individuals times 10. Discard site if total sequencing depth (all
+    individuals added together) is above the number of individuals times
+    10. 
+-   *SNP_pval* [1e-10]: only work with sites with a p-value from the
+    likelihood test of less than 1e-10.
+-   *Gl* [1]: use SAMtools genotype likelihood calling algorithm. One
+    assumption of the SAMtools algorithm is that it assumes that errors
+    are not independent, but that once a first error occurs at a certain
+    site in an individual, a second error is more likely to occur at the
+    same site
+-   *minMaf* [0.05]: only work with sites with a maf above 0.05
+-   *minInd* [28]: Set to 30% of sample size to include a proportion of
+    individuals.
+
+### Step 5: Collate
+
+```{bash, Step5-collate, eval=F, echo=T}
+python3 lcWGSpipeline_step5-collate.py -p boreogadus.ckpt
+```
+
+Again, copy and edit new files, including the output name
+
+```{bash Concatenate, eval=F, echo=T}
+./boreogadus_concat_minInd0.3_minDepthHalf_mafs.sh
+./boreogadus_concat_minInd0.3_minDepthHalf_beagles.sh
+```
+
+### Step 6: Population Analyses - FST
+
+The groups here were 1) fall and 2) summer, where the first column is
+the ABLG sample and the second tab-delimited column is the group. Lines
+from the group file would read like so:
+
+```         
+ABLG1234  summer
+ABLG1235  fall
+```
+
+```{R, group_file, eval=F, echo=T}
+#To create this file: 
+metadata_df <- read.csv("./data/metadata/yukon_boreogadus_metadata.csv")
+
+group_df <- metadata_df %>%
+  mutate(sampleID = sub("^", "ABLG", ABLG)) %>%
+  select(sampleID, Runtime)
+
+write.table(group_df, "./sedna_files/fall_summer_groups.txt", col.names = F, row.names = F, quote = F, sep = "\t")  
+```
+
+Move file to sedna scripts folder.
+
+```{bash, PopAnaly_py, eval=F, echo=T}
+python3 lcWGSpipeline_pop-analyses.py -p boreogadus.ckpt -g fall_summer_groups.txt
+```
+
+The python script creates a bamlist for each group, and the shell script
+contains every combination of comparisons for FST. First, angsd calls
+GLs for each subgroup, but it uses the sites flag from the file created
+in Step 5, so the SNPs being called will be the same as for the
+polymorphic files from Step 4. Therefore, some of the filtering steps
+have been removed, such as: *SNP_pval* and *minMaf*.
+
+*setminDepth* and set*maxDepth* are included, but adjusted to the sample
+size of the group. Added minInd to 70%, and changed minMapQ to 20.
+
+```{bash, fst, eval=F, echo=T}
+# change name to better explain the Fst run
+mv boreogadus_popARRAY.sh boreogadus_fst_fall-summer_ARRAY.sh
+
+./boreogadus_fst_fall-summer_ARRAY.sh
+```
+
+This resulted in only 187,667 SNPs across the genome. Rerunning without
+minInd and lowering minMapQ back to 15.
+
+```{bash, fst_redo, eval=F, echo=T}
+./boreogadus_fst_fall-summer_noMinInd_ARRAY.sh
+```
+
+###### FINAL CHOSEN RUN:
+
+*setminDepth* and set*maxDepth* are included, but adjusted to the sample
+size of the group. Added minInd to 30%, minDepth to half, maxDepth to
+10\* and minMapQ to 20.
+
+```{bash, fst_redo, eval=F, echo=T}
+./boreogadus_minInd0.3_minDepthHalf_fstARRAY.sh
+```
+
+Plot Whole genome FST and for each chromosome.
+
+```{r, WG_FST_plots, eval=F, echo=T}
+fst_manhattan_boreogadus.R
+```
+
+Plot local FST for two main regions of interest with genes.
+
+```{r, localFST_plots, eval=F, echo=T}
+fst_manhattan_peaks_with_genes.R
+```
+
+Honed in on lrrc9 region (chr35) and new estrogen receptor beta region
+(chr 29).
+
+### Step 7: Local PCAs
+
+Create local PCAs in lrrc9 and esrb.
+
+```{bash LocalpcAngsd, eval=F, echo=T}
+lrrc9_pca_minInd0.3.sh
+esrb_expand_pca_minInd0.3.sh # expand because not exact gene region
+```
+
+Plot pcas for two main regions of interest.
+
+```{r, PCA_plots, eval=F, echo=T}
+pca_esrb_boreogadus.R
+pca_lrrc9_boreogadus.R
+```
+
+The output of these pca groups created putative haplotype groups for
+these individuals as homozygous early, heterozygous, and homozygous
+late. Homozygous individuals were collected into a textfile to be rerun
+in sedna for an allelic FST.

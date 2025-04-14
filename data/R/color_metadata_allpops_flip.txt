@@ -1,0 +1,11 @@
+Pop	Region	Color	Color2
+Chukchi	West Arctic	maroon4	maroon4
+Coronation	West Arctic	palevioletred	hotpink1
+Pond	East Arctic	darkorange	darkorange
+Broughton	East Arctic	seagreen3	springgreen
+SEBaffin	Southeast Nunavut	darkgreen	darkgreen
+Frobisher	Southeast Nunavut	#A28EF5	#A28EF5
+Labrador	Southeast Nunavut	darkgoldenrod4	yellow2
+Hudson	Southeast Nunavut	steelblue1	cyan2
+Southhampton	Southeast Nunavut	darkslateblue	mediumblue
+Iceland	Iceland	#A87000	#A87000
