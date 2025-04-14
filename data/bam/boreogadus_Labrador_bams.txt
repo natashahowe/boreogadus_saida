@@ -1,0 +1,7 @@
+/home/mchale/Documents/Arctic_cod/New_genome/Iceland_samples/AC_6637_sorted.bam
+/home/mchale/Documents/Arctic_cod/New_genome/Iceland_samples/AC_6517_sorted.bam
+/home/mchale/Documents/Arctic_cod/New_genome/Iceland_samples/AC_6529_sorted.bam
+/home/mchale/Documents/Arctic_cod/New_genome/Iceland_samples/AC_6525_sorted.bam
+/home/mchale/Documents/Arctic_cod/New_genome/Iceland_samples/AC_6509_sorted.bam
+/home/mchale/Documents/Arctic_cod/New_genome/Iceland_samples/AC_6510_sorted.bam
+/home/mchale/Documents/Arctic_cod/New_genome/Iceland_samples/AC_6520_sorted.bam
