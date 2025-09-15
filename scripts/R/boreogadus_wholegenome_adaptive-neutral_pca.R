@@ -6,6 +6,7 @@ library(tidyverse)
 DATE = "20241222"
 markertypes = c('neutral','adaptive')
 alphas = c(0.05,0.001)
+alphas = 0.05
 
 METADATAFILE <- "./data/R/boreogadus_metadata.csv"
 BAMFILE <- "./data/R/boreogadus_filtered_downsampled_bams.txt"
