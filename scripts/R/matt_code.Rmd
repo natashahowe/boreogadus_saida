@@ -1,0 +1,239 @@
+---
+title: "matt_code"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F)
+```
+
+```{r install-packages}
+library(ggplot2)
+library(lostruct)
+library(bcftools)
+library(tidyverse)
+library(RColoBrewer) 
+```
+
+Plink command for LD
+
+```{bash}
+./plink
+```
+
+Plot LD
+
+```{r}
+redband_OMY05 <- read.delim("/Users/mchale/Desktop/plink/redband_OMY05.ld",sep="",
+                            header=T,stringsAsFactors = FALSE)
+
+redband_OMY05 <- redband_OMY05[order(redband_OMY05$R2),]
+
+redband_OMY05 %>% 
+  filter(R2>=0.3) %>% 
+  ggplot(data=.)+
+  geom_point(aes(x=BP_A,y=BP_B,color=R2),shape=15,size=0.7)+
+  scale_color_gradient(low="gray99",high="gray4")
+```
+
+Running MSDS analysis on samples to take into account underlying pop
+structure and find regions of the genome that might be behaving
+weird/evidence for inversions
+
+1)  Use ANGSD to score SNPs, remember to alter -doGeno to "-doGeno 2" so
+    that it spits out genotypes in numeric format i.e., -1, 0, 1, 2.
+    this is what's needed as input for MSDS analysis. The most recent
+    example is on Charr from Labrador:
+
+```{bash eval=F, echo=T}
+./angsd -nthreads 16 -bam labrador2-bam-list.txt \
+  -out labrador_charr2 \
+  -doMaf 2 -minMaf 0.05 -minInd 100 -doPost 1 -doMajorMinor 1 -snp_pval 1e-6 \
+  -doGeno 2 -GL 1 -minQ 20 -minMapQ 20 -doPlink 2 -doCounts 1
+```
+
+2)  Run geno output file through Mac's scripts to change the formatting
+    of the genotypes and TSV format
+
+```{r}
+data_charr2 <- read_tsv("/Users/mchale/Desktop/labrador_charr2.geno.gz",col_names=FALSE)
+data_charr2 <- data_charr2[-ncol(data_charr2)]
+
+genos <- data_charr2 %>% 
+  select(-X1,-X2) %>% 
+  mutate_all(~na_if(.,'-1')) %>% 
+  mutate_all(funs(gsub("0","0/0",.))) %>% 
+  mutate_all(funs(gsub("1","0/1",.))) %>% 
+  mutate_all(funs(gsub("2","1/1",.)))
+
+cols <- data_charr2 %>% 
+  select(X1,X2) %>% 
+  rename('#CHROM' = X1, POS=X2) %>% 
+  mutate(ID="NA") %>% 
+  mutate(REF="A",ALT="C",
+         QUAL=".",FILTER="PASS",
+         "INFO"="NS=181",FORMAT="GT")
+
+vcfbody <- cbind(cols,genos)
+
+write_tsv(vcfbody,"/Users/mchale/Desktop/charr_2.body")
+```
+
+Then copy over body file into Misc folder on server and run
+
+```{bash eval=F}
+cat redbands.header charr_2.body > charr_2.vcf
+bgzip charr_2.vcf
+```
+
+and export the zipped vcf back onto the computer (Desktop)
+
+3)  Running MDS
+
+```{r}
+snps_charr <- read_vcf("/Users/mchale/Desktop/canada_2.vcf.gz") 
+```
+
+\*NB, you will need bcftools installed on the computer and accessible by
+R. I have this on my desktop not my laptop because of memory issues...
+to do this type
+
+```{bash}
+Sys.setenv(PATH=paste("/Users/matthewhale/Documents/genomics_software/bcftools-1.18/",Sys.getenv("PATH"),sep=":"))
+```
+
+Can change the window size depending on number of markers and if RAD seq
+or WGS.
+
+```{r}
+pcs_charr2 <- eigen_windows(snps_charr,k=2,win=20) 
+pcdist_charr2 <- pc_dist(pcs_charr2,npc=2)
+fit2d_canada2 <- cmdscale(pcdist_charr2,eig=TRUE,k=4)
+dim(fit2d_canada2$points)
+```
+
+```{r}
+canada_snps_VCF <- read.vcfR("/Users/mchale/Desktop/canada_2.vcf.gz")
+canada_snps_positions <- data.frame(canada_snps_VCF@fix,stringsAsFactors = FALSE)
+head(canada_snps_positions)
+```
+
+```{r}
+windows = rep(1:(dim(fit2d_canada2$points)[1]+1),each=20) # remember to change the value of "each" to match the number of windows specified above.
+windows <- windows[1:dim(canada_snps_positions)[1]]
+canada_snps_positions$windows <- windows
+head(canada_snps_positions)
+```
+
+
+```{r}
+charr_canada2_chroms <- canada_snps_positions %>% 
+  group_by(windows) %>% 
+  mutate(Start=min(POS),Stop=max(POS))
+
+write.table(charr_canada2_chroms,"/Users/mchale/Desktop/charr_canada2_chroms.txt",sep="\t")
+write.table(fit2d_canada2$points,"/Users/mchale/Desktop/canada2_charr_MDS.txt")
+```
+
+Combine window info with MDS and make cumulative bp column in excel.
+
+```{r}
+charr_canada2_MDS <- read.delim("/Users/mchale/Desktop/charr_canada2_MDS.txt",sep="\t",header=T,stringsAsFactors = FALSE)
+View(charr_canada2_MDS)
+
+charr_canada2_chroms <- charr_canada2_MDS %>% 
+  group_by(CHROM) %>% 
+  mutate(Start=min(cumulative_bp), 
+         Stop = max(cumulative_bp)) %>% 
+  select(CHROM,Start,Stop) %>% 
+  unique()
+```
+
+make Manhatten style plots: NB, Chroms file is redbands_chroms_info.txt
+
+Find the outliers for each MDS:
+
+```{r}
+out<- boxplot.stats(charr2_MDS$MDS1)$out
+out_ind <- which(charr2_MDS$MDS1 %in% c(out))
+out_ind
+```
+
+```{r}
+outliers <- charr2_MDS[out_ind,]
+View(outliers)
+
+nb.colos <- nrow (charr_canada2_chroms)
+mycolors <- colorRampPalette(brewer.pal(8, "Set1"))(nb.colos)
+```
+
+good idea to check to make sure number of colours corresponds to the
+number of chromosomes.
+
+this is the last step in R to make the Manhattan plot: remember to type
+"color=as.factor(Chr))" rather than what Mac has in his protocol or
+you'll get a weird error when trying to assign colors to the geom_points
+
+```{r}
+ggplot(pinks_MDS_avg) + 
+  geom_rect(data=chroms, aes(xmin=Start,xmax=Stop,
+                             ymin=min(pinks_MDS_avg$MDS4),ymax=max(pinks_MDS_avg$MDS4)),
+            fill=mycolors,alpha=0.25)+
+  geom_point(data=pinks_MDS_avg,aes(x=cumulative_bp,y=MDS4,color=as.factor(Chr)),
+             alpha=0.75,cex=0.5)+
+  geom_point(data=outliers4,aes(x=cumulative_bp,y=MDS4),color="black",cex=0.5)+
+  scale_x_continuous(breaks=chroms$Stop,labels=chroms$Chr)+
+  scale_color_manual(values=mycolors)+
+  ylab("MDS4")+
+  xlab("Sockeye Linkage group")+
+  theme(legend.position = "none",
+        panel.grid = element_blank(),
+        axis.text.x = element_text(angle=45,hjust=1,face="bold",size=6))
+
+ggsave("/Users/matthewhale/Dropbox/redbands_MDS4_plot.jpg",width=10,height=4)
+```
+
+Making boxplots to summarize observed heterozygosity for candidate
+inversion regions. First, select markers in plink (tped file) that are
+in candidate region. Put through plink with the following code...
+
+```{bash, eval=F}
+./plink --tfile Charr_Canada_LG15_group3 --allow-extra-chr --out canada_charr_LG15_HO --het
+```
+
+Annoyingly, PLINK counts the number of homozygotes NOT the number of
+hets, so need to do `1-(number of homs - number of SNPs)`. then,
+categorize individuals based on genotype. I'm allowing some differences,
+but at least 70% of SNPs must show "the same" genotype for me to call
+it, in other words, at least 70% of markers must be e.g., homo for the
+common form. if that's not the case don't score the individual based on
+inversion. then input observed heterozygosity and inversion type into R
+and use the obs. heterozygosity to make the boxes using the following
+code:
+
+```{r}
+my_palette <- colorRampPalette(c("darkblue","blue","lightblue")) (n=3)
+
+ggplot(data=charr_data_boxplot2) + 
+  geom_boxplot(mapping=aes(group=inversion.genotype,y = Average.het),fill=my_palette) +
+  ylab("average heterozygosity")+ 
+  xlab("inversion type")
+
+ggsave ("/Users/matthewhale/Documents/lG15_Nunavut_charr_Het_boxplot.jpg",width =5, height = 3)
+```
+
+admixture analysis
+
+PCA on candidate CI region with samples colored by population
+
+```{r}
+cod_colors <- read.delim("/Users/matthewhale/Dropbox/Arctic_cod/color_metadata_allpops.txt",header=T,sep="\t")
+
+ggplot(data=cod_non_outliers,aes(x=PC2,y=PC3,color=Population))+
+  geom_point(alpha=1)+
+  scale_color_manual(values=cod_colors$Color)+
+  theme(panel.grid = element_blank())
+```

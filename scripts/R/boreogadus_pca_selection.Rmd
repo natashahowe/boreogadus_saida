@@ -118,8 +118,21 @@ selection_table %>%
 
 ggsave(paste0(outdir,"boreogadus_pcangsd_selection_scan.jpg"), height = 10, width = 20)
 ```
-
+Count number of outliers by chromosome
 ```{r}
 selection_table %>% filter(fdr<0.001) %>%
-   count(chr)
+   count(pc,chr)
+```
+Count number of outliers by fused/unfused chromosome
+```{r}
+outliers <- selection_table %>% 
+  filter(pc=="X1",
+         fdr<0.001) %>%
+  mutate(chromType = ifelse(chr < 6, "fused","unfused")) %>%
+  count(chromType)
+
+outliers
+
+print(paste("Percent of pc1 outliers found on fused chroms:",
+round(outliers[1,2]/sum(outliers[,2])*100, digits=1), "%"))
 ```

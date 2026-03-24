@@ -1,0 +1,265 @@
+---
+title: "boreogadus-selection-scan"
+author: "Natasha Howe"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+PCANGSD Selection Scan
+
+PCAngsd has two implemented selection scans based on (i) FASTPCA and (ii) pcadapt. The associated paper compares the methods with high and low coverage data ([Meisner et al 2021](https://pmc.ncbi.nlm.nih.gov/articles/PMC8480091/#Sec2)).
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries-metadata, warning=F, message=F}
+library(stringr)
+library(tools)
+library(tidyverse)
+library(cowplot)
+
+chr_table <- read_tsv("../../data/R/boreogadus_chromosomes.txt", 
+                      col_names = T, show_col_types = F) %>%
+  rename(lg = chrName)
+```
+
+## Neutral Data
+
+```{r naming}
+path= "../../results/pca_selection/"
+filename="boreogadus_unfused_neutral_alpha0.05"
+outdir="../../figures/pca_selection/"
+nEig=4
+```
+
+PCA
+
+```{r}
+color_df <- read.delim("../../data/R/color_metadata_allpops_flip.txt", header = T)
+meta_df <- read.delim("../../data/R/boreogadus_sampleID_popID.txt", sep="\t", 
+                      header = F, col.names = c("sampleID","Pop"))
+bam_df <- read.table("../../data/bam/boreogadus_filtered_downsampled_bams.txt", header = F)
+
+# read in the covariance matrix
+cov <- read.table(paste0(path,filename,"_e",nEig,".cov"))
+  e <- eigen(cov)
+  e_vectors <- as.data.frame(e$vectors)
+  e_per <- e$values/sum(e$values) # percent explained by each component
+  # varPC1 <- format(round((e$values[1]/sum(e$values)*100), 2), nsmall = 2) 
+  # varPC2 <- format(round((e$values[2]/sum(e$values)*100), 2), nsmall = 2) 
+  # varPC3 <- format(round((e$values[3]/sum(e$values)*100), 2), nsmall = 2)
+  # varPC4 <- format(round((e$values[4]/sum(e$values)*100), 2), nsmall = 2) 
+  
+# Get ID and pop info for each individual
+  bam_df <- bam_df %>%
+    mutate(sampleID = basename(file_path_sans_ext(V1))%>% 
+             gsub("_downsampled|boreogadus_|_sorted", "", .)) %>%
+    left_join(meta_df, by = "sampleID") %>% 
+    mutate(Pop = ifelse(is.na(Pop),"Iceland",Pop)) %>%
+    dplyr::select(sampleID, Pop)
+    
+#combine row names (Pop info) with the covariance matrix
+pca.vectors = as_tibble(cbind(bam_df, e_vectors))
+```
+
+### PCA
+
+```{r}
+# create mypalette
+mypalette <- as.vector(color_df$Color2)
+  names(mypalette) <- color_df$Pop # attach pop name to palette color
+
+pca.vectors[,1:7] %>%
+  pivot_longer(cols = starts_with("V"), names_to = "axis", values_to = "val") %>%
+  group_by(sampleID) %>% # Replace with your ID column
+  mutate(axis_next = lead(axis),
+         val_next = lead(val),
+         pair = paste(axis, "vs", axis_next)) %>%
+  filter(!is.na(val_next)) %>%
+  mutate(Pop = factor(Pop, levels = color_df$Pop)) %>%
+  # plot
+  ggplot(aes(x = val, y = val_next)) +
+  geom_point(mapping=aes(color = Pop),alpha = 0.6) +
+  facet_wrap(~pair, scales = "free") +
+  scale_color_manual(values = mypalette) +
+  labs(x = "Lower PC Axis", y = "Higher PC Axis",
+       title=filename) +
+  theme_bw()
+
+# ggsave(paste0(outdir,filename,"_PCs1-4.jpg"), height = 6, width = 8)
+rm(pca.vectors, cov, e, e_per, e_vectors,mypalette)
+```
+
+### Weights
+
+```{r}
+# PC weights
+weight_tmp <- read_delim(paste0(path,filename,"_e",nEig,".weights"), delim=" ",
+                         col_names = c("pc1","pc2", "pc3","pc4"), show_col_types = F) %>% 
+  as_tibble()
+
+# output sites file from PCAngsd - not as expected
+# should be 1 for keep and 0 for remove
+sites_file <- read_tsv(str_c(path,filename,"_e",nEig,".sites"), 
+                       col_names="keep", show_col_types = F)
+
+# snp-list from beagle file
+snp_list <- read_tsv(str_c(path,filename,".snp_list"), 
+                     col_names = c("lg","pos"),
+                     show_col_types = F) %>%
+  slice(-1) # bc pcangsd removes the first row from the cut beagle file
+
+# weight table from snp list and kept sites  
+weight_table <- sites_file %>%
+  bind_cols(snp_list) %>%
+  filter(keep==1) %>%
+  dplyr::select(lg, pos) %>%
+  bind_cols(weight_tmp) %>%
+  pivot_longer(cols = 3:(ncol(weight_tmp)+2), names_to = "pc", values_to = "weight") %>%
+  left_join(chr_table, by="lg")
+
+loadings_plot <- weight_table %>%
+  mutate(pos = as.numeric(pos)) %>%
+  ggplot() +
+  geom_point(aes(x=pos/10^6, y=abs(weight), color=as_factor(chr)), size=0.1) +
+  scale_color_manual(values = rep(c('black', 'grey50'), 50)) +
+  scale_x_continuous(breaks=seq(0, 100, 10)) +  
+  facet_grid(pc~chr, scales='free_x', space='free_x') +
+  theme_cowplot() +
+  labs(x = "Position (Mb)",
+       title = "Boreogadus: Neutral Dataset - PCAngsd Loadings") +
+  theme(panel.spacing = unit(0.1, 'lines'),
+        axis.title.x=element_text(),
+        axis.text=element_text(size=6),
+        legend.position='none',
+        text = element_text(size=10),
+        axis.text.x = element_text(angle = 45))
+
+ggsave(paste0(outdir,filename,"_PC_loadings.jpg"), 
+       plot = loadings_plot,
+       height = 16, width = 20)
+
+rm(weight_tmp, weight_table)
+```
+
+Definitely seems to be inversions driving most of the pc weights form pc1, pc3, and pc4.
+
+### Selection outliers
+
+```{r}
+############### nicolas lou rmd
+selection_tmp <- read_delim(paste0(path,filename,"_e",nEig,".selection"), delim=" ",
+                         col_names = F, show_col_types = F) %>% 
+  as_tibble()
+
+# combine selection output with sites
+selection_table <- sites_file %>%
+  bind_cols(snp_list) %>%
+  filter(keep==1) %>%
+  dplyr::select(lg, pos) %>%
+  bind_cols(selection_tmp) %>%
+  pivot_longer(cols = 3:(ncol(selection_tmp)+2), names_to = "pc", values_to = "d") %>%
+  mutate(p=pchisq(d, 1, lower.tail=FALSE)) %>%
+  left_join(chr_table, by="lg") %>%
+  group_by(pc) %>%
+  mutate(bonferroni=p.adjust(p, method="bonferroni"),
+         fdr=p.adjust(p, method="fdr")) %>%
+  ungroup()
+
+# Plot for PC1 and PC2
+selection_plot <- selection_table %>%
+  ggplot(aes(x=as.numeric(pos)/10^6, y=-log10(p), color=as_factor(chr))) +
+  geom_point(size=0.1) +
+  geom_point(data=selection_table %>% filter(fdr<0.01), color="red", size=0.2) +
+  # geom_point(data=selection_table %>% slice_min(p, n=round(nrow(selection_tmp)/10000)),
+  #            color="red", size=0.2) +
+  scale_color_manual(values = rep(c('black', 'grey50'), 50)) +
+  scale_x_continuous(breaks=seq(10, 90, 10)) +  
+  facet_grid(pc~chr, scales='free_x', space='free_x') +
+    labs(x = "Position (Mb)",
+       title = "Boreogadus: Neutral Dataset Selection Scan") +
+  theme_cowplot() +
+  theme(panel.spacing = unit(0.1, 'lines'),
+        axis.title.x=element_text(),
+        axis.text=element_text(size=6),
+        legend.position='none',
+        text = element_text(size=10),
+        axis.text.x = element_text(angle = 45))
+
+ggsave(paste0(outdir,filename,"_selection_scan.jpg"), 
+       plot = selection_plot, height = 15, width = 20)
+
+rm(selection_tmp)
+```
+
+Awesome! PC2 does not have outliers... which that looks like the most neutral trend from before anyways..
+
+### Remove PCA Outlier SNP Regions from Neutral Dataset
+
+It looks like outliers are generally concentrated on one region when found on a chromosome. This means I can remove loci that are within the range of the first and last outlier positions.
+
+```{r}
+outlier_regions <- selection_table %>% 
+  filter(fdr<0.01) %>%
+  group_by(pc,chr) %>%
+  summarize(minPos = min(pos), maxPos=max(pos)) %>%
+  ungroup() %>%
+  arrange(chr, minPos)
+  
+filtered_sites <- snp_list %>%
+  left_join(chr_table, by="lg") %>% 
+  left_join(., outlier_regions, by = "chr", relationship = "many-to-many") %>%
+  group_by(chr, pos) %>%
+  mutate(within_range = any(pos >= minPos & pos <= maxPos, na.rm = TRUE)) %>%
+  filter(!within_range) %>%
+  ungroup() %>%
+  dplyr::select(chr,lg,pos) %>%
+  distinct()
+
+print(paste(nrow(filtered_sites),"SNPs left.",
+  nrow(snp_list)-nrow(filtered_sites),"SNPs were removed."))
+
+filtered_sites %>%
+  mutate(chrpos=str_c(lg,"_",pos)) %>%
+  dplyr::select(chrpos) %>%
+  write_tsv(str_c("../../data/R/",filename,"_e",nEig,"_rmPCAngsdOutliers.tsv"), col_names=F)
+```
+
+### Remove MDS Outlier Regions from Neutral Dataset
+
+Matt shared his MDS outliers output with me. Import here.
+
+```{r}
+library(readxl)
+
+#mds_df <- read_xlsx("../../results/mds/MDS_analysis.xlsx")
+mds_sig_df <- read_xlsx("../../results/mds/MDS_windows_significant.xlsx") %>%
+  mutate(minPos = Start,
+         maxPos = Stop)
+
+mds_filtered_sites <- filtered_sites %>%
+  left_join(chr_table, by="lg") %>% 
+  left_join(., outlier_regions, by = "chr", relationship = "many-to-many") %>%
+  group_by(chr, pos) %>%
+  mutate(within_range = any(pos >= minPos & pos <= maxPos, na.rm = TRUE)) %>%
+  filter(!within_range) %>%
+  ungroup() %>%
+  dplyr::select(chr,lg,pos) %>%
+  distinct()
+
+print(paste(nrow(mds_filtered_sites),"SNPs left.",
+  nrow(filtered_sites)-nrow(mds_filtered_sites),"SNPs were removed."))
+
+
+
+
+
+
+
+
+
+
+
+
+```
