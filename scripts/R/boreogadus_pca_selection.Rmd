@@ -1,0 +1,125 @@
+---
+title: "boreogadus-selection-scan"
+author: "Natasha Howe"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+PCANGSD Selection Scan
+
+PCAngsd has two implemented selection scans based on (i) FASTPCA and (ii) pcadapt. The associated paper compares the methods with high and low coverage data ([Meisner et al 2021](https://pmc.ncbi.nlm.nih.gov/articles/PMC8480091/#Sec2)).
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries-metadata, warning=F, message=F}
+library(tidyverse)
+library(cowplot)
+
+chr_table <- read_tsv("../../data/R/boreogadus_chromosomes.txt", col_names = T, show_col_types = F) %>%
+  rename(lg = chrName)
+```
+
+### Whole genome scan
+
+```{r}
+path= "../../results/pca_selection/"
+filename="boreogadus_wholegenome_20241222_e2"
+outdir="../../figures/pca_selection/"
+
+# PC weights
+weight_tmp <- read_delim(paste0(path,filename,".weights"), delim=" ",
+                         col_names = c("pc1","pc2"), show_col_types = F) %>% 
+  as_tibble()
+
+# output sites file from PCAngsd - not as expected
+# should be 1 for keep and 0 for remove
+sites_file <- read_tsv(str_c(paste0(path,filename,".sites")), 
+                       col_names="keep", show_col_types = F)
+
+# snp-list from beagle file
+snp_list <- read_tsv(str_c(paste0("../../results/gls/boreogadus_wholegenome_20241222.sites")), 
+                     col_names = c("lg","pos","major","minor"),
+                     show_col_types = F) 
+
+# weight table from snp list and kept sites  
+weight_table <- sites_file %>%
+  bind_cols(snp_list) %>%
+  filter(keep==1) %>%
+  dplyr::select(lg, pos) %>%
+  bind_cols(weight_tmp) %>%
+  pivot_longer(cols = 3:(ncol(weight_tmp)+2), names_to = "pc", values_to = "weight") %>%
+  left_join(chr_table, by="lg")
+
+weight_table %>%
+  mutate(pos = as.numeric(pos)) %>%
+  ggplot() +
+  geom_point(aes(x=pos/10^6, y=abs(weight), color=as_factor(chr)), size=0.1) +
+  scale_color_manual(values = rep(c('black', 'grey50'), 50)) +
+  scale_x_continuous(breaks=seq(0, 100, 10)) +  
+  facet_grid(pc~chr, scales='free_x', space='free_x') +
+  theme_cowplot() +
+  labs(x = "Position (Mb)",
+       title = "Boreogadus: PCAngsd Loadings") +
+  theme(panel.spacing = unit(0.1, 'lines'),
+        axis.title.x=element_text(),
+        axis.text=element_text(size=6),
+        legend.position='none',
+        text = element_text(size=10),
+        axis.text.x = element_text(angle = 45))
+
+ggsave(paste0(outdir,"boreogadus_PC_loadings.jpg"), height = 10, width = 20)
+
+rm(weight_tmp, weight_table)
+```
+
+This isn't finished for selection.
+
+```{r}
+############### nicolas lou rmd
+selection_tmp <- read_delim(paste0(path,filename,".selection"), delim=" ",
+                         col_names = F, show_col_types = F) %>% 
+  as_tibble()
+
+# combine selection output with sites
+selection_table <- sites_file %>%
+  bind_cols(snp_list) %>%
+  filter(keep==1) %>%
+  dplyr::select(lg, pos) %>%
+  bind_cols(selection_tmp) %>%
+  pivot_longer(cols = 3:(ncol(selection_tmp)+2), names_to = "pc", values_to = "d") %>%
+  mutate(p=pchisq(d, 1, lower.tail=FALSE)) %>%
+  left_join(chr_table, by="lg") %>%
+  group_by(pc) %>%
+  mutate(bonferroni=p.adjust(p, method="bonferroni"),
+         fdr=p.adjust(p, method="fdr")) %>%
+  ungroup()
+
+# Plot for PC1 and PC2
+selection_table %>%
+  ggplot(aes(x=as.numeric(pos)/10^6, y=-log10(p), color=as_factor(chr))) +
+  geom_point(size=0.1) +
+  geom_point(data=selection_table %>% filter(fdr<0.001), color="red", size=0.2) +
+  # geom_point(data=selection_table %>% slice_min(p, n=round(nrow(selection_tmp)/10000)),
+  #            color="red", size=0.2) +
+  scale_color_manual(values = rep(c('black', 'grey50'), 50)) +
+  scale_x_continuous(breaks=seq(10, 90, 10)) +  
+  facet_grid(pc~chr, scales='free_x', space='free_x') +
+    labs(x = "Position (Mb)",
+       title = "Boreogadus: PCAngsd Selection Scan") +
+  theme_cowplot() +
+  theme(panel.spacing = unit(0.1, 'lines'),
+        axis.title.x=element_text(),
+        axis.text=element_text(size=6),
+        legend.position='none',
+        text = element_text(size=10),
+        axis.text.x = element_text(angle = 45))
+
+ggsave(paste0(outdir,"boreogadus_pcangsd_selection_scan.jpg"), height = 10, width = 20)
+```
+
+```{r}
+selection_table %>% filter(fdr<0.001) %>%
+   count(chr)
+```
