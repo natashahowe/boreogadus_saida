@@ -3,9 +3,9 @@ Chukchi Sea	Chukchi	West Arctic
 Coronation Gulf	Coronation	West Arctic
 Pond Inlet	Pond	East Arctic
 Broughton Island	Broughton	East Arctic
-Southeast Baffin (EAZ)	SEBaffin	Southeast Nunavut
-Hudson Strait (WAZ)	Hudson	Southeast Nunavut
+Southeast Baffin	SEBaffin	Southeast Nunavut
 Frobisher Bay	Frobisher	Southeast Nunavut
+Labrador Sea	Labrador	Southeast Nunavut
+Hudson Strait	Hudson	Southeast Nunavut
 Southhampton Island	Southhampton	Southeast Nunavut
-Labrador Sea (SFA4)	Labrador	Southeast Nunavut
-UNK	Unknown	Unknown
+Iceland	Iceland	East Arctic
