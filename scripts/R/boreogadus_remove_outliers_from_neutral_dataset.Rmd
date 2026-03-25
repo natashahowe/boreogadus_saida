@@ -41,24 +41,23 @@ meta_df <- read.delim("../../data/R/boreogadus_sampleID_popID.txt", sep="\t",
                       header = F, col.names = c("sampleID","Pop"))
 bam_df <- read.table("../../data/bam/boreogadus_filtered_downsampled_bams.txt", header = F)
 
+mypalette <- as.vector(color_df$Color2)
+  names(mypalette) <- color_df$Pop # attach pop name to palette color
+
+# Get ID and pop info for each individual
+bam_df <- bam_df %>%
+  mutate(sampleID = basename(file_path_sans_ext(V1))%>% 
+           gsub("boreogadus_|_downsampled|_sorted", "", .)) %>%
+  left_join(meta_df, by = "sampleID") %>% 
+  mutate(Pop = ifelse(is.na(Pop),"Iceland",Pop)) %>%
+  dplyr::select(sampleID, Pop)
+  
 # read in the covariance matrix
 cov <- read.table(paste0(path,filename,"_e",nEig,".cov"))
   e <- eigen(cov)
   e_vectors <- as.data.frame(e$vectors)
   e_per <- e$values/sum(e$values) # percent explained by each component
-  # varPC1 <- format(round((e$values[1]/sum(e$values)*100), 2), nsmall = 2) 
-  # varPC2 <- format(round((e$values[2]/sum(e$values)*100), 2), nsmall = 2) 
-  # varPC3 <- format(round((e$values[3]/sum(e$values)*100), 2), nsmall = 2)
-  # varPC4 <- format(round((e$values[4]/sum(e$values)*100), 2), nsmall = 2) 
-  
-# Get ID and pop info for each individual
-  bam_df <- bam_df %>%
-    mutate(sampleID = basename(file_path_sans_ext(V1))%>% 
-             gsub("_downsampled|boreogadus_|_sorted", "", .)) %>%
-    left_join(meta_df, by = "sampleID") %>% 
-    mutate(Pop = ifelse(is.na(Pop),"Iceland",Pop)) %>%
-    dplyr::select(sampleID, Pop)
-    
+
 #combine row names (Pop info) with the covariance matrix
 pca.vectors = as_tibble(cbind(bam_df, e_vectors))
 ```
@@ -66,10 +65,7 @@ pca.vectors = as_tibble(cbind(bam_df, e_vectors))
 ### PCA
 
 ```{r}
-# create mypalette
-mypalette <- as.vector(color_df$Color2)
-  names(mypalette) <- color_df$Pop # attach pop name to palette color
-
+# manipulate df and plot
 pca.vectors[,1:7] %>%
   pivot_longer(cols = starts_with("V"), names_to = "axis", values_to = "val") %>%
   group_by(sampleID) %>% # Replace with your ID column
@@ -78,7 +74,6 @@ pca.vectors[,1:7] %>%
          pair = paste(axis, "vs", axis_next)) %>%
   filter(!is.na(val_next)) %>%
   mutate(Pop = factor(Pop, levels = color_df$Pop)) %>%
-  # plot
   ggplot(aes(x = val, y = val_next)) +
   geom_point(mapping=aes(color = Pop),alpha = 0.6) +
   facet_wrap(~pair, scales = "free") +
@@ -88,7 +83,7 @@ pca.vectors[,1:7] %>%
   theme_bw()
 
 # ggsave(paste0(outdir,filename,"_PCs1-4.jpg"), height = 6, width = 8)
-rm(pca.vectors, cov, e, e_per, e_vectors,mypalette)
+rm(cov, e, e_per, e_vectors, pca.vectors)
 ```
 
 ### Weights
@@ -99,8 +94,7 @@ weight_tmp <- read_delim(paste0(path,filename,"_e",nEig,".weights"), delim=" ",
                          col_names = c("pc1","pc2", "pc3","pc4"), show_col_types = F) %>% 
   as_tibble()
 
-# output sites file from PCAngsd - not as expected
-# should be 1 for keep and 0 for remove
+# output sites file from PCAngsd - 1 for keep and 0 for remove
 sites_file <- read_tsv(str_c(path,filename,"_e",nEig,".sites"), 
                        col_names="keep", show_col_types = F)
 
@@ -232,34 +226,363 @@ Matt shared his MDS outliers output with me. Import here.
 
 ```{r}
 library(readxl)
+library(RColorBrewer)
 
-#mds_df <- read_xlsx("../../results/mds/MDS_analysis.xlsx")
-mds_sig_df <- read_xlsx("../../results/mds/MDS_windows_significant.xlsx") %>%
-  mutate(minPos = Start,
-         maxPos = Stop)
+mds_df <- read_xlsx("../../results/mds/MDS_analysis.xlsx")
 
-mds_filtered_sites <- filtered_sites %>%
-  left_join(chr_table, by="lg") %>% 
-  left_join(., outlier_regions, by = "chr", relationship = "many-to-many") %>%
+offsets <- mds_df %>%
+  mutate(CHROM=as.numeric(CHROM)) %>%
+  group_by(CHROM) %>%
+  dplyr::summarise(max_bp = max(POS, na.rm = T), 
+                   .groups = "drop") %>%
+  arrange(CHROM) %>%
+  mutate(cumulative_bp = cumsum(max_bp),
+         offset = lag(cumulative_bp, default = 0),
+         chrMid = (max_bp/2 + offset))
+
+# Join back to the main df and calculate cumulative position
+mds_df1 <- mds_df %>%
+  left_join(offsets, by = "CHROM") %>%
+  mutate(cumPos = POS + offset) %>%
+  dplyr::select(CHROM,POS,cumPos,starts_with("MD")) %>%
+  dplyr::relocate(cumPos, .before="MDS1")
+
+mds_df_longer <- mds_df1 %>%
+  pivot_longer(cols = starts_with("MD"),
+               names_to = "MDS",
+               values_to = "value")
+
+mds_outliers <- mds_df_longer %>%
+  group_by(MDS) %>%
+  mutate(outlier = value %in% boxplot.stats(value)$out)
+
+out <- boxplot.stats(mds_df1$MDS1)$out
+out_ind <- which(mds_df1$MDS1 %in% c(out))
+out_ind
+
+outliers <- mds_df1[out_ind,]
+View(outliers)
+
+nb.colos <- nrow(offsets)
+mycolors <- colorRampPalette(brewer.pal(8,"Set1"))(nb.colos)
+names(mycolors) <- offsets$CHROM
+```
+
+MDS 1 only
+
+```{r}
+ggplot(mds_df1) + 
+  # rectangles colored by chrom
+  geom_rect(data=offsets, 
+            aes(xmin=offset,xmax=cumulative_bp,
+                ymin=min(mds_df1$MDS1)-0.01, ymax=max(mds_df1$MDS1)+0.01),
+            fill=mycolors,alpha=0.25)+
+  # all mds points
+  geom_point(data=mds_df1,aes(x=cumPos,y=MDS1,color=as.factor(CHROM)),
+             alpha=0.75,cex=0.5)+
+  # outlier mds points
+  geom_point(data=outliers,aes(x=cumPos,y=MDS1),color="black",cex=0.5)+
+  scale_x_continuous(breaks=offsets$chrMid, # offsets$cumulative_bp,
+                     labels=offsets$CHROM,
+                     expand = c(0.002, 0.002))+
+  scale_y_continuous(expand = c(0.001, 0.001))+
+  scale_color_manual(values=mycolors)+
+  ylab("MDS1")+
+  xlab("Chromosome Number")+
+  theme_bw() +
+  theme(legend.position = "none",
+        panel.grid = element_blank(),
+        axis.text.x = element_text(face="bold",size=6))
+```
+
+The outputs looks the same, except that the outlier cutoff is more stringent in his plot.
+
+All MDSs faceted
+
+```{r}
+faceted_plot <- ggplot(mds_outliers) + 
+  # rectangles colored by chrom
+  geom_rect(data = offsets, 
+            aes(xmin = offset, xmax = cumulative_bp,
+                ymin = -Inf, ymax = Inf, # Use -Inf/Inf to fill the whole height
+                fill = as.factor(CHROM)), 
+            alpha = 0.25, inherit.aes = FALSE)+
+  # all mds points
+  geom_point(data=mds_outliers %>% filter(outlier==F),aes(x=cumPos,y=value,color=as.factor(CHROM)),
+             alpha=0.75,cex=0.5)+
+  # outlier mds points
+  geom_point(data=mds_outliers %>% filter(outlier==T),aes(x=cumPos,y=value),color="black",cex=0.5)+
+  scale_x_continuous(breaks=offsets$chrMid,
+                     labels=offsets$CHROM,
+                     expand = c(0.002, 0.002))+
+  scale_y_continuous(expand = c(0.001, 0.001))+
+  facet_grid(rows=vars(MDS), scales="free_y")+
+  scale_color_manual(values=mycolors)+
+  scale_fill_manual(values=mycolors)+
+  theme_bw() +
+  theme(legend.position = "none",
+        panel.grid = element_blank(),
+        axis.text.x = element_text(face="bold",size=6))
+
+ggsave("../../figures/mds/boreogadus_mds_plots.jpeg",
+       plot=faceted_plot, width = 20, height = 25)
+```
+
+Didn't end up incorporating the MDS outliers in the new neutral SNP group because I couldn't replicate the cutoff value. Instead, using the regions he identified in the supplemental table as MDS outliers and potential inversions. Included both those that were included and those that weren't. Also removed the identified putative inversions from the Hoff paper.
+
+# Filter Neutral SNPs
+
+Incorporated the MDS outliers Matt tested for inversions & the inversions identified in Hoff Supplemental Table 2 of the pop gen paper.
+
+```{r}
+# collected tables that matt created and from Hoff's pop paper
+invers_hale <- read_xlsx("../../results/mds/inversion_regions_Hale_and_Hoff.xlsx",sheet = "Hale") %>%
+  mutate(chr=as.numeric(chr),startPos = as.numeric(startPos),
+         endPos = as.numeric(endPos))
+invers_hoff <- read_xlsx("../../results/mds/inversion_regions_Hale_and_Hoff.xlsx",sheet = "Hoff") %>%
+  mutate(chr=as.numeric(chr),startPos = as.numeric(startPos),
+         endPos =as.numeric(endPos))
+
+inversions <- bind_rows(invers_hale,invers_hoff)
+
+neutral_snps <- filtered_sites %>%
+  left_join(., inversions, by = "chr", relationship = "many-to-many") %>%
   group_by(chr, pos) %>%
-  mutate(within_range = any(pos >= minPos & pos <= maxPos, na.rm = TRUE)) %>%
-  filter(!within_range) %>%
+  mutate(within_inversion = any(pos >= startPos & pos <= endPos, na.rm = TRUE)) %>%
+  filter(!within_inversion) %>%
   ungroup() %>%
-  dplyr::select(chr,lg,pos) %>%
-  distinct()
+  distinct(chr,pos)
 
-print(paste(nrow(mds_filtered_sites),"SNPs left.",
-  nrow(filtered_sites)-nrow(mds_filtered_sites),"SNPs were removed."))
+print(paste(nrow(neutral_snps),"SNPs left.",
+  nrow(filtered_sites)-nrow(neutral_snps),"SNPs were removed."))
 
+neutral_snps %>%
+  left_join(chr_table, by = "chr") %>%
+  mutate(chrpos=str_c(lg,"_",pos)) %>%
+  dplyr::select(chrpos) %>%
+  write_tsv(str_c("../../data/R/",filename,"_e",nEig,"_rmPCAngsdOutliers_rmInversions.tsv"), col_names=F)
 
+```
 
+### Attempt 2 - Neutral PCA
 
+```{bash eval=F}
+sbatch ~/arctic/scripts/bsaida_neutral_rmInversions_pcangsd.sh
+```
 
+Using the above snp subset, how does a pca look? Did we get rid of the inversion signal?
 
+```{r}
+newfilename="boreogadus_unfused_neutral_alpha0.05_e4_rmPCAngsdOutliers_rmInversions"
+nEig=4
+#cov <- read.table(paste0("../../results/pca/",newfilename,".cov"))
+cov <- read.table(paste0(path,newfilename,"_e",nEig,".cov"))
+  e <- eigen(cov)
+  e_vectors <- as.data.frame(e$vectors)
+  e_per <- e$values/sum(e$values) # percent explained by each component
+  
+#combine row names (Pop info) with the covariance matrix
+pca.vectors = as_tibble(cbind(bam_df, e_vectors))# create mypalette
 
+# manipulate df and plot
+pca.vectors[,1:7] %>%
+  pivot_longer(cols = starts_with("V"), names_to = "axis", values_to = "val") %>%
+  group_by(sampleID) %>% # Replace with your ID column
+  mutate(axis_next = lead(axis),
+         val_next = lead(val),
+         pair = paste(axis, "vs", axis_next)) %>%
+  filter(!is.na(val_next)) %>%
+  mutate(Pop = factor(Pop, levels = color_df$Pop)) %>%
+  ggplot(aes(x = val, y = val_next)) +
+  geom_point(mapping=aes(color = Pop),alpha = 0.6) +
+  facet_wrap(~pair, scales = "free") +
+  scale_color_manual(values = mypalette) +
+  labs(x = "Lower PC Axis", y = "Higher PC Axis",
+       title=newfilename) +
+  theme_bw()
 
+ggsave(paste0(outdir,newfilename,"_PCs1-4.jpg"), height = 6, width = 8)
+```
 
+#### New Neutral Weights
 
+```{r}
+# PC weights
+weight_tmp <- read_delim(paste0(path,newfilename,"_e",nEig,".weights"), delim=" ",
+                         col_names = c("pc1","pc2", "pc3","pc4"), show_col_types = F) %>% 
+  as_tibble()
 
+# output sites file from PCAngsd - not as expected
+# should be 1 for keep and 0 for remove
+sites_file <- read_tsv(str_c(path,newfilename,"_e",nEig,".sites"), 
+                       col_names="keep", show_col_types = F)
 
+# snp-list from beagle file
+snp_list <- neutral_snps %>%
+  left_join(chr_table, by = "chr") %>%
+  slice(-1) # bc pcangsd removes the first row from the cut beagle file
+  
+# weight table from snp list and kept sites  
+weight_table <- sites_file %>%
+  bind_cols(snp_list) %>%
+  filter(keep==1) %>%
+  dplyr::select(lg, pos) %>%
+  bind_cols(weight_tmp) %>%
+  pivot_longer(cols = 3:(ncol(weight_tmp)+2), names_to = "pc", values_to = "weight") %>%
+  left_join(chr_table, by="lg")
+
+loadings_plot <- weight_table %>%
+  mutate(pos = as.numeric(pos)) %>%
+  ggplot() +
+  geom_point(aes(x=pos/10^6, y=abs(weight), color=as_factor(chr)), size=0.1) +
+  scale_color_manual(values = rep(c('black', 'grey50'), 50)) +
+  scale_x_continuous(breaks=seq(0, 100, 10)) +  
+  facet_grid(pc~chr, scales='free_x', space='free_x') +
+  theme_cowplot() +
+  labs(x = "Position (Mb)",
+       title = "Boreogadus: New Neutral Dataset - PCAngsd Loadings") +
+  theme(panel.spacing = unit(0.1, 'lines'),
+        axis.title.x=element_text(),
+        axis.text=element_text(size=6),
+        legend.position='none',
+        text = element_text(size=10),
+        axis.text.x = element_text(angle = 45))
+
+ggsave(paste0(outdir,newfilename,"_PC_loadings.jpg"), 
+       plot = loadings_plot,
+       height = 16, width = 20)
+
+rm(weight_tmp)
+```
+
+It looks like the start of chr9 is causing the split for PC1 Let's visualize it closer
+
+```{r}
+weight_table %>%
+  mutate(pos = as.numeric(pos)) %>%
+  filter(chr==9, pc=="pc1") %>%
+  ggplot() +
+  geom_point(aes(x=pos/10^6, y=abs(weight)), color="gray20", size=0.8) +
+  scale_x_continuous(breaks=seq(0, 100, 1)) 
+```
+
+### Attempt 3 - Neutral PCA
+
+Remove snps from chr9 positions 0-6Mb. Rerun pcangsd with that further filtered snp list.
+
+```{bash eval=F}
+sbatch ~/arctic/scripts/bsaida_neutral_rmInversions_pluschr9a_pcangsd.sh
+```
+
+```{r}
+newfilename="boreogadus_unfused_neutral_alpha0.05_e4_rmPCAngsdOutliers_rmInversions_rmchr9a"
+nEig=10
+
+#cov <- read.table(paste0(path,newfilename,".cov"))
+cov <- read.table(paste0(path,newfilename,"_e",nEig,".cov"))
+  e <- eigen(cov)
+  e_vectors <- as.data.frame(e$vectors)
+  e_per <- e$values/sum(e$values) # percent explained by each component
+  varPC1 <- format(round((e$values[1]/sum(e$values)*100), 2), nsmall = 2) 
+  varPC2 <- format(round((e$values[2]/sum(e$values)*100), 2), nsmall = 2) 
+
+#combine row names (Pop info) with the covariance matrix
+pca.vectors = as_tibble(cbind(bam_df, e_vectors))# create mypalette
+
+# manipulate df and plot
+pca.vectors[,1:7] %>%
+  pivot_longer(cols = starts_with("V"), names_to = "axis", values_to = "val") %>%
+  group_by(sampleID) %>% # Replace with your ID column
+  mutate(axis_next = lead(axis),
+         val_next = lead(val),
+         pair = paste(axis, "vs", axis_next)) %>%
+  filter(!is.na(val_next)) %>%
+  mutate(Pop = factor(Pop, levels = color_df$Pop)) %>%
+  ggplot(aes(x = val, y = val_next)) +
+  geom_point(mapping=aes(color = Pop),alpha = 0.6) +
+  facet_wrap(~pair, scales = "free") +
+  scale_color_manual(values = mypalette) +
+  labs(x = "Lower PC Axis", y = "Higher PC Axis",
+       title=newfilename) +
+  theme_bw()
+
+ggsave(paste0(outdir,newfilename,"_PCs1-4.jpg"), height = 6, width = 8)
+```
+
+Yay! Inversions signals are gone. There is still individual pull out, but that's not unexpected. Now only plot PC1
+
+```{r}
+pca.vectors %>%
+  mutate(Pop = factor(Pop, levels = color_df$Pop)) %>%
+  ggplot(aes(x = V1, y = V2)) +
+  geom_point(mapping=aes(color = Pop), alpha = 0.6) +
+  scale_color_manual(values = mypalette) +
+  labs(x = "PC1", y = "PC2") +
+  theme_bw() +
+  theme(legend.position = "none")
+
+#rm southhampton outliers
+pca.vectors %>%
+  filter(V1 < 0.5) %>%
+  mutate(Pop = factor(Pop, levels = color_df$Pop)) %>%
+ggplot(aes(x = V1, y = V2)) +
+  geom_point(mapping=aes(color = Pop), alpha = 0.6) +
+  scale_color_manual(values = mypalette) +
+  labs(x = str_c("PC1 (",varPC1,"%)"), y = str_c("PC2 (",varPC2,"%)"),
+       title=newfilename) +
+  theme_bw()
+
+```
+
+#### New Neutral Weights
+
+```{r}
+# PC weights
+weight_tmp <- read_delim(paste0(path,newfilename,"_e",nEig,".weights"), delim=" ",
+                         col_names = c("pc1","pc2", "pc3","pc4"), show_col_types = F) %>% 
+  as_tibble()
+
+# output sites file from PCAngsd - not as expected
+# should be 1 for keep and 0 for remove
+sites_file <- read_tsv(str_c(path,newfilename,"_e",nEig,".sites"), 
+                       col_names="keep", show_col_types = F)
+
+# snp-list from beagle file
+snp_list <- snp_list %>%
+  mutate(rm = ifelse(chr==9 & pos <=6000000,T,F)) %>%
+  filter(rm==F) %>%
+  dplyr::select(-rm)
+  
+# weight table from snp list and kept sites  
+weight_table <- sites_file %>%
+  bind_cols(snp_list) %>%
+  filter(keep==1) %>%
+  dplyr::select(lg, pos) %>%
+  bind_cols(weight_tmp) %>%
+  pivot_longer(cols = 3:(ncol(weight_tmp)+2), names_to = "pc", values_to = "weight") %>%
+  left_join(chr_table, by="lg")
+
+loadings_plot <- weight_table %>%
+  filter(!(str_starts(pc,"X"))) %>%
+  mutate(pos = as.numeric(pos)) %>%
+  ggplot() +
+  geom_point(aes(x=pos/10^6, y=abs(weight), color=as_factor(chr)), size=0.1) +
+  scale_color_manual(values = rep(c('black', 'grey50'), 50)) +
+  scale_x_continuous(breaks=seq(0, 100, 10)) +  
+  facet_grid(pc~chr, scales='free_x', space='free_x') +
+  theme_cowplot() +
+  labs(x = "Position (Mb)",
+       title = "Boreogadus: New Neutral Dataset - PCAngsd Loadings") +
+  theme(panel.spacing = unit(0.1, 'lines'),
+        axis.title.x=element_text(),
+        axis.text=element_text(size=6),
+        legend.position='none',
+        text = element_text(size=10),
+        axis.text.x = element_text(angle = 45))
+
+ggsave(paste0(outdir,newfilename,"_PC_loadings.jpg"), 
+       plot = loadings_plot,
+       height = 16, width = 20)
+
+rm(weight_tmp)
 ```
