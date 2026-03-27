@@ -166,31 +166,8 @@ write.table(fit2d_canada2$points,"/Users/mchale/Desktop/canada2_charr_MDS.txt")
 
 Combine window info with MDS and make cumulative bp column in excel.
 
-*NH found error in excel calcs and provides alternative to stay within
-R.*
-
-*Error is that the first position was added to the chromosome 1 position
-of all subsequent snps when it should just be the basepair position
-without any additions for chrom 1. Also, used the second to last
-position from chr1 as the counter for chr2, same for chr3.*
-
-```{r}
-# Calculate starting offset for each chromosome
-offsets <- canada_snps_positions %>%
-  mutate(CHROM=as.numeric(CHROM)) %>%
-  group_by(CHROM) %>%
-  dplyr::summarise(max_bp = max(POS, na.rm = T), 
-                   .groups = "drop") %>%
-  arrange(CHROM) %>%
-  mutate(offset = lag(cumsum(max_bp), default = 0)) %>%
-  dplyr::select(CHROM, offset)
-
-# Join back to the main df and calculate cumulative position
-charr_canada2_chroms <- canada_snps_positions %>%
-  left_join(offsets, by = "CHROM") %>%
-  mutate(cumPos = POS + offset) %>%
-  dplyr::select(offset) 
-```
+*NH found error in excel calcs and provides alternative to stay within R
+below.*
 
 ```{r}
 charr_canada2_MDS <- read.delim("/Users/mchale/Desktop/charr_canada2_MDS.txt",sep="\t",header=T,stringsAsFactors = FALSE)
@@ -248,7 +225,109 @@ ggplot(pinks_MDS_avg) +
 ggsave("/Users/matthewhale/Dropbox/redbands_MDS4_plot.jpg",width=10,height=4)
 ```
 
-#### Heterozygosity within MDS outliers
+*Error is that the first position was added to the chromosome 1 position
+of all subsequent snps when it should just be the basepair position
+without any additions for chrom 1. Also, used the second to last
+position from chr1 as the counter for chr2, same for chr3.*
+
+###### NH alternative to MDS plotting - stay in R
+
+Do cumulative bp calc locally in R
+
+```{r}
+library(readxl)
+
+mds_df <- read_xlsx("../../results/mds/MDS_analysis.xlsx")
+
+# create chromosome cumulative bp offsets
+offsets <- mds_df %>%
+  mutate(CHROM=as.numeric(CHROM)) %>%
+  group_by(CHROM) %>%
+  dplyr::summarise(max_bp = max(POS, na.rm = T), 
+                   .groups = "drop") %>%
+  arrange(CHROM) %>%
+  mutate(cumulative_bp = cumsum(max_bp),
+         offset = lag(cumulative_bp, default = 0),
+         chrMid = (max_bp/2 + offset))
+
+# Join back to the main df and calculate cumulative position
+mds_cum_df <- mds_df %>%
+  left_join(offsets, by = "CHROM") %>%
+  mutate(cumPos = POS + offset) %>%
+  dplyr::select(CHROM,POS,cumPos,starts_with("MD")) %>%
+  dplyr::relocate(cumPos, .before="MDS1")
+
+out <- boxplot.stats(mds_cum_df$MDS1)$out
+out_ind <- which(mds_cum_df$MDS1 %in% c(out))
+out_ind
+
+outliers <- mds_cum_df[out_ind,]
+
+# Plotting color scheme:
+mycolors <- colorRampPalette(brewer.pal(8,"Set1"))(nrow(offsets))
+names(mycolors) <- offsets$CHROM
+
+ggplot(mds_cum_df) + 
+  # rectangles colored by chrom
+  geom_rect(data=offsets, 
+            aes(xmin=offset,xmax=cumulative_bp,
+                # ymin = -Inf, ymax = Inf, # Use -Inf/Inf instead of below
+                ymin=min(mds_cum_df$MDS1)-0.01, ymax=max(mds_cum_df$MDS1)+0.01),
+            fill=mycolors,alpha=0.25)+
+  # all mds points
+  geom_point(data=mds_cum_df,aes(x=cumPos,y=MDS1,color=as.factor(CHROM)),
+             alpha=0.75,cex=0.5)+
+  # outlier mds points
+  geom_point(data=outliers,aes(x=cumPos,y=MDS1),color="black",cex=0.5)+
+  scale_x_continuous(breaks=offsets$chrMid, 
+                     labels=offsets$CHROM,
+                     expand = c(0.002, 0.002))+
+  scale_y_continuous(expand = c(0.001, 0.001))+
+  scale_color_manual(values=mycolors)+
+  ylab("MDS1")+
+  xlab("Chromosome Number")+
+  theme_bw() +
+  theme(legend.position = "none",
+        panel.grid = element_blank(),
+        axis.text.x = element_text(face="bold",size=6))
+```
+
+Many plots at once by faceting.
+
+```{r}
+mds_outliers <- mds_cum_df %>%
+  pivot_longer(cols = starts_with("MD"),
+               names_to = "MDS",
+               values_to = "value") %>%
+  group_by(MDS) %>%
+  mutate(outlier = value %in% boxplot.stats(value)$out)
+
+faceted_plot <- ggplot(mds_outliers) + 
+  # rectangles colored by chrom
+  geom_rect(data = offsets, 
+            aes(xmin = offset, xmax = cumulative_bp,
+                ymin = -Inf, ymax = Inf, # Use -Inf/Inf to fill the whole height
+                fill = as.factor(CHROM)), 
+            alpha = 0.25, inherit.aes = FALSE)+
+  # all mds points
+  geom_point(data=mds_outliers %>% filter(outlier==F),aes(x=cumPos,y=value,color=as.factor(CHROM)),
+             alpha=0.75,cex=0.5)+
+  # outlier mds points
+  geom_point(data=mds_outliers %>% filter(outlier==T),aes(x=cumPos,y=value),color="black",cex=0.5)+
+  scale_x_continuous(breaks=offsets$chrMid,
+                     labels=offsets$CHROM,
+                     expand = c(0.002, 0.002))+
+  scale_y_continuous(expand = c(0.001, 0.001))+
+  facet_grid(rows=vars(MDS), scales="free_y")+
+  scale_color_manual(values=mycolors)+
+  scale_fill_manual(values=mycolors)+
+  theme_bw() +
+  theme(legend.position = "none",
+        panel.grid = element_blank(),
+        axis.text.x = element_text(face="bold",size=6))
+```
+
+### Heterozygosity within MDS outliers
 
 Making boxplots to summarize observed heterozygosity for candidate
 inversion regions. First, select markers in plink (tped file) that are
@@ -261,7 +340,7 @@ in candidate region.
 ```
 
 Annoyingly, PLINK counts the number of homozygotes NOT the number of
-hets, so need to do `1-(number of homs - number of SNPs)`. then,
+hets, so need to do `1-(number of homs / number of SNPs)`. then,
 categorize individuals based on genotype. I'm allowing some differences,
 but at least 70% of SNPs must show "the same" genotype for me to call
 it, in other words, at least 70% of markers must be e.g., homo for the
