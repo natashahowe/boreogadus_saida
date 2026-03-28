@@ -1,0 +1,488 @@
+---
+title: "boreogadus-mds-outliers"
+author: "Natasha Howe"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+## Inversions
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries-metadata, warning=F, message=F}
+library(stringr)
+library(tools)
+library(tidyverse)
+library(cowplot)
+
+chr_table <- read_tsv("../../data/R/boreogadus_chromosomes.txt", 
+                      col_names = T, show_col_types = F) %>%
+  rename(lg = chrName)
+```
+
+## Input Data
+
+```{r naming}
+path= "../../results/pca_selection/"
+filename="boreogadus_unfused_neutral_alpha0.05"
+outdir="../../figures/pca_selection/"
+```
+
+```{r}
+meta_df <- read.csv("../../data/R/boreogadus_metadata.csv", header = T) %>%
+  mutate(Population = ifelse(Population=='Southhampton Island', 
+                             'Southampton Island', Population),
+         Pop = case_when(Population == 'SE Baffin' ~ 'SEBaffin',
+                         TRUE ~ gsub(' .*$','',Population))) %>%
+  filter(Pop != 'Unknown')
+
+color_df <- read.delim2("../../data/R/color_metadata_allpops_flip.txt", 
+                        header = T, row.names = NULL, sep = "\t") %>%
+  mutate(Pop = gsub('hh','h',Pop)) %>%
+  left_join(meta_df %>% distinct(Population, Pop), by  = "Pop")
+
+bam_df <- read.table("../../data/bam/boreogadus_filtered_downsampled_bams.txt", header = F)
+
+mypalette <- as.vector(color_df$Color2)
+  names(mypalette) <- color_df$Pop # attach pop name to palette color
+
+# Get ID and pop info for each individual
+bam_df <- bam_df %>%
+  mutate(sampleID = basename(file_path_sans_ext(V1))%>% 
+           gsub("boreogadus_|_downsampled|_sorted", "", .)) %>%
+  left_join(meta_df, by = "sampleID") %>% 
+  mutate(Pop = ifelse(is.na(Pop),"Iceland",Pop)) %>%
+  dplyr::select(sampleID, Pop)
+```
+
+### MDS Outliers
+
+Matt shared his MDS outliers output with me. Import here.
+
+```{r}
+library(readxl)
+library(RColorBrewer)
+
+mds_df <- read_xlsx("../../results/mds/MDS_analysis.xlsx")
+
+offsets <- mds_df %>%
+  mutate(CHROM=as.numeric(CHROM)) %>%
+  group_by(CHROM) %>%
+  dplyr::summarise(max_bp = max(POS, na.rm = T), 
+                   .groups = "drop") %>%
+  arrange(CHROM) %>%
+  mutate(cumulative_bp = cumsum(max_bp),
+         offset = lag(cumulative_bp, default = 0),
+         chrMid = (max_bp/2 + offset))
+
+# Join back to the main df and calculate cumulative position
+mds_df1 <- mds_df %>%
+  left_join(offsets, by = "CHROM") %>%
+  mutate(cumPos = POS + offset) %>%
+  dplyr::select(CHROM,POS,cumPos,starts_with("MD")) %>%
+  dplyr::relocate(cumPos, .before="MDS1")
+
+mds_df_longer <- mds_df1 %>%
+  pivot_longer(cols = starts_with("MD"),
+               names_to = "MDS",
+               values_to = "value")
+
+mds_outliers <- mds_df_longer %>%
+  group_by(MDS) %>%
+  mutate(outlier = value %in% boxplot.stats(value)$out)
+
+out <- boxplot.stats(mds_df1$MDS1)$out
+out_ind <- which(mds_df1$MDS1 %in% c(out))
+out_ind
+
+outliers <- mds_df1[out_ind,]
+View(outliers)
+
+nb.colos <- nrow(offsets)
+mycolors <- colorRampPalette(brewer.pal(8,"Set1"))(nb.colos)
+names(mycolors) <- offsets$CHROM
+```
+
+MDS 1 only
+
+```{r}
+ggplot(mds_df1) + 
+  # rectangles colored by chrom
+  geom_rect(data=offsets, 
+            aes(xmin=offset,xmax=cumulative_bp,
+                ymin=min(mds_df1$MDS1)-0.01, ymax=max(mds_df1$MDS1)+0.01),
+            fill=mycolors,alpha=0.25)+
+  # all mds points
+  geom_point(data=mds_df1,aes(x=cumPos,y=MDS1,color=as.factor(CHROM)),
+             alpha=0.75,cex=0.5)+
+  # outlier mds points
+  geom_point(data=outliers,aes(x=cumPos,y=MDS1),color="black",cex=0.5)+
+  scale_x_continuous(breaks=offsets$chrMid, # offsets$cumulative_bp,
+                     labels=offsets$CHROM,
+                     expand = c(0.002, 0.002))+
+  scale_y_continuous(expand = c(0.001, 0.001))+
+  scale_color_manual(values=mycolors)+
+  ylab("MDS1")+
+  xlab("Chromosome Number")+
+  theme_bw() +
+  theme(legend.position = "none",
+        panel.grid = element_blank(),
+        axis.text.x = element_text(face="bold",size=6))
+```
+
+The outputs looks the same, except that the outlier cutoff is more stringent in his plot.
+
+All MDSs faceted
+
+```{r}
+faceted_plot <- ggplot(mds_outliers) + 
+  # rectangles colored by chrom
+  geom_rect(data = offsets, 
+            aes(xmin = offset, xmax = cumulative_bp,
+                ymin = -Inf, ymax = Inf, # Use -Inf/Inf to fill the whole height
+                fill = as.factor(CHROM)), 
+            alpha = 0.25, inherit.aes = FALSE)+
+  # all mds points
+  geom_point(data=mds_outliers %>% filter(outlier==F),aes(x=cumPos,y=value,color=as.factor(CHROM)),
+             alpha=0.75,cex=0.5)+
+  # outlier mds points
+  geom_point(data=mds_outliers %>% filter(outlier==T),aes(x=cumPos,y=value),color="black",cex=0.5)+
+  scale_x_continuous(breaks=offsets$chrMid,
+                     labels=offsets$CHROM,
+                     expand = c(0.002, 0.002))+
+  scale_y_continuous(expand = c(0.001, 0.001))+
+  facet_grid(rows=vars(MDS), scales="free_y")+
+  scale_color_manual(values=mycolors)+
+  scale_fill_manual(values=mycolors)+
+  theme_bw() +
+  theme(legend.position = "none",
+        panel.grid = element_blank(),
+        axis.text.x = element_text(face="bold",size=6))
+
+ggsave("../../figures/mds/boreogadus_mds_plots.jpeg",
+       plot=faceted_plot, width = 20, height = 25)
+```
+
+# Filter Neutral SNPs
+
+#### Known/Suspected Inversions
+
+Incorporated the MDS outliers Matt tested for inversions & the inversions identified in Hoff Supplemental Table 2 of the pop gen paper.
+
+```{r}
+# collected tables that matt created and from Hoff's pop paper
+invers_hale <- read_xlsx("../../results/mds/inversion_regions_Hale_and_Hoff.xlsx",sheet = "Hale") %>%
+  mutate(chr=as.numeric(chr),startPos = as.numeric(startPos),
+         endPos = as.numeric(endPos))
+invers_hoff <- read_xlsx("../../results/mds/inversion_regions_Hale_and_Hoff.xlsx",sheet = "Hoff") %>%
+  mutate(chr=as.numeric(chr),startPos = as.numeric(startPos),
+         endPos =as.numeric(endPos))
+
+inversions <- bind_rows(invers_hale,invers_hoff)
+
+```
+
+### PCAs
+
+Create peak file
+
+```{r}
+invers_hale %>%
+  left_join(., chr_table,by="chr") %>%
+  mutate(inputFormat=paste(row_number(),
+                           lg,
+                           format(startPos,scientific=F),
+                           format(endPos,scientific=F),
+                           sep=":")%>%
+           gsub(" ","",.)) %>%
+  select(inputFormat) %>%
+  write_tsv("../../data/R/bsaida_inversions_input.txt", col_names = F)
+```
+
+```{bash, eval=F}
+sbatch scripts/boreogadus_inversion_pca_only.sh -d /home/nhowe/arctic -k scripts/bsaida_inversions_input.txt -b boreogadus_wholegenome_20241222.beagle -f /figures/ -p bsaida -m boreogadus_filtered_downsampled_bams.txt -l no
+```
+
+After importing locally
+
+```{r}
+inv_cov_list <- list.files(path = "../../results/pca/inversion", 
+                            pattern = "*.cov", full.names = T) %>%
+  set_names(nm = basename(file_path_sans_ext(.)) %>% 
+              sub("bsaida_","",.)) %>%
+  map(~read.table(.)) 
+
+# Assuming your list of dataframes is named 'data_list'
+inv_pca_list <- lapply(inv_cov_list, function(cov) {
+  e <- eigen(cov)
+  e_vectors <- as.data.frame(e$vectors)[,1:3] # only save PCs 1-3
+  return( as_tibble(cbind(bam_df, e_vectors)) )
+})
+
+inv_pca_df <- bind_rows(inv_pca_list, .id = "inversion") %>%
+  mutate(inversion2=inversion) %>%
+  separate_wider_delim(inversion2, delim="_", 
+                       names = c("chrName","start","end")) %>%
+  left_join(chr_table, join_by("chrName"=="lg")) %>%
+  mutate(startMb = sub("s","",start) %>% as.numeric(.)/1e6,
+         endMb = sub("e","",end) %>% as.numeric(.)/1e6,
+         strip_title = paste('chr',chr,':',startMb,'-',endMb,'Mb'),
+         Pop = factor(Pop, levels = color_df$Pop),
+         strip_title = factor(strip_title, 
+                              levels = unique(inv_pca_df$strip_title)))
+
+inv_pca_df %>%
+  ggplot() +
+  geom_point(aes(x = V1, y = V2, color = Pop),alpha=0.7) +
+  facet_wrap(~ strip_title, nrow=3, scales = "free") +
+  scale_color_manual(values=mypalette)+
+  theme_bw()+
+  theme(strip.text = element_text(size=8),
+        panel.grid = element_blank())
+
+ggsave("../../figures/test.jpeg", plot = test, width = 20, height = 8)
+```
+
+#### Remove two individuals consistently staying at 0,0 (missing data)
+```{r}
+missingdata_inds <- inv_pca_df %>%
+  filter(strip_title==unique(inv_karyo$strip_title)[17],
+         V1 > -0.02, V1 < 0.02) %>%
+  pull(sampleID)
+
+missingness_bam <- bam_df %>%
+  mutate(filter = ifelse(sampleID %in% missingdata_inds,0,1)) 
+
+missingness_bam %>%
+  select(filter) %>%
+  write_tsv("../../data/pca_filter/boreogadus_pca_rm_missingness_inds.txt", 
+            col_names = F)
+```
+
+### New Filtered PCA
+```{r}
+inv_cov_list <- list.files(path = "../../results/inversion/pca", 
+                            pattern = "*filter.cov", full.names = T) %>%
+  set_names(nm = basename(file_path_sans_ext(.)) %>% 
+              sub("bsaida_","",.) %>% sub("_filter","",.)) %>%
+  map(~read.table(.)) 
+
+# Assuming your list of dataframes is named 'data_list'
+inv_pca_list <- lapply(inv_cov_list, function(cov) {
+  e <- eigen(cov)
+  e_vectors <- as.data.frame(e$vectors)[,1:3] # only save PCs 1-3
+  return( as_tibble(cbind(missingness_bam %>% 
+                            filter(filter==1), 
+                          e_vectors)) )
+})
+
+inv_pca_df <- bind_rows(inv_pca_list, .id = "inversion") %>%
+  mutate(inversion2=inversion) %>%
+  separate_wider_delim(inversion2, delim="_", 
+                       names = c("chrName","start","end")) %>%
+  left_join(chr_table, join_by("chrName"=="lg")) %>%
+  mutate(startMb = sub("s","",start) %>% as.numeric(.)/1e6,
+         endMb = sub("e","",end) %>% as.numeric(.)/1e6,
+         strip_title = paste('chr',chr,':',startMb,'-',endMb,'Mb'),
+         Pop = factor(Pop, levels = color_df$Pop),
+         strip_title = factor(strip_title, 
+                              levels = unique(inv_pca_df$strip_title)))
+
+inv_pca_df %>%
+  ggplot() +
+  geom_point(aes(x = V1, y = V2, color = Pop),alpha=0.7) +
+  facet_wrap(~ strip_title, nrow=3, scales = "free") +
+  scale_color_manual(values=mypalette)+
+  theme_bw()+
+  theme(strip.text = element_text(size=8),
+        panel.grid = element_blank())
+
+# ggsave("../../figures/inversions/filter/inversion_pcas_by_pop.jpeg", width = 20, height = 8)
+```
+### Heterozygosity
+
+Plink - create bed file for each region and then run heterozygosity
+
+```{bash}
+sbatch ~/arctic/scripts/boreogadus_plink_inv_het.sh
+```
+
+```{r}
+inv_het_list <- list.files(path = "../../results/inversion/het", 
+                            pattern = "*.het", full.names = T) %>%
+  set_names(nm = basename(file_path_sans_ext(.)) %>% 
+              sub("boreogadus_","",.)) %>%
+  map(~read.table(., header=T) %>%
+        mutate(het = (N.NM. - O.HOM.) / N.NM.) %>%
+        bind_cols(bam_df))
+
+inv_het_df <- bind_rows(inv_het_list,.id="inversion") %>%
+  dplyr::select(inversion, sampleID, het) %>%
+  drop_na(het) %>%
+  left_join(inv_pca_df, ., by = c("inversion","sampleID")) %>%
+  mutate(strip_title = factor(strip_title, 
+                              levels = unique(inv_pca_df$strip_title))) %>%
+  group_by(strip_title) %>%
+  mutate(rel_het = (het - min(het,na.rm=T)) / (max(het,na.rm=T) - min(het,na.rm=T)) ) %>%
+  ungroup()
+```
+
+Het PCA combo
+
+```{r}
+ggplot(inv_het_df) +
+  geom_point(aes(x = V1, y = V2, color = het),alpha=0.7) +
+  facet_wrap(~ strip_title, nrow=3, scales = "free") +
+  scale_color_viridis()+
+  theme_bw()+
+  theme(strip.text = element_text(size=8),
+        panel.grid = element_blank())
+
+# ggsave("../../figures/inversions/filter/inversion_pc_plots_heterozygosity.jpeg",
+#        width = 20, height = 8)
+
+ggplot(inv_het_df) +
+  geom_point(aes(x = V1, y = V2, color = rel_het),alpha=0.7) +
+  facet_wrap(~ strip_title, nrow=3, scales = "free") +
+  scale_color_viridis(name = "Relative Heterozygosity", na.value = "gray40")+
+  theme_bw()+
+  theme(strip.text = element_text(size=8),
+        panel.grid = element_blank())
+
+# ggsave("../../figures/inversions/filter/inversion_pc_plots_relative_heterozygosity.jpeg",
+#        width = 20, height = 8)
+```
+
+#### Boxplots
+
+This will be very loose - I am going to split PC1 up into 3 for each inversion plot. 
+I corrected a few that were obviously not assigned properly by the pc1 three group method.
+
+```{r}
+# split pc1 into three parts and assign based solely on where it lands on pc1
+inv_karyo <- inv_het_df %>%
+  group_by(inversion) %>%
+  mutate(karyo = case_when(V1 < (max(V1,na.rm=T) - min(V1,na.rm=T))/3 + min(V1,na.rm=T) ~ "0/0",
+                           V1 > 2*(max(V1,na.rm=T) - min(V1,na.rm=T))/3 + min(V1,na.rm=T) ~ "1/1",
+                           T ~ "0/1")) %>%
+  ungroup()
+
+# check
+ggplot(inv_karyo) +
+  geom_point(aes(x = V1, y = V2, color = karyo),alpha=0.7) +
+  facet_wrap(~ strip_title, nrow=3, scales = "free")
+
+# some karyotypes are not properly represented by this...
+inv_karyo <- inv_karyo %>%
+  mutate(karyo = case_when(strip_title != "chr 1 : 25.1 - 30.7 Mb" ~ karyo,
+                           V2 > -0.06 | V1 < 0 ~ "0/1", T ~ "1/1"),
+         karyo = case_when(strip_title != "chr 1 : 31.1 - 34.28 Mb" ~ karyo,
+                           V2 > 0.3 | V1 < 0.05 ~ "0/0",
+                           V1 > 0.25 ~ "1/1", T ~ "0/1"))
+
+# recheck
+ggplot(inv_karyo) +
+  geom_point(aes(x = V1, y = V2, color = karyo),alpha=0.7) +
+  facet_wrap(~ strip_title, nrow=3, scales = "free") 
+
+# ggsave("../../figures/inversions/filter/inversion_pc_plots_karyotypes.jpeg",
+#        width = 20, height = 8)
+```
+#### Significance
+Interested in significantly greater heterozygosity in the middle cluster only.
+```{r}
+library(broom)
+library(ggpubr)
+
+# Compare everyone specifically to Pop B
+inv_karyo_tests <- inv_karyo %>%
+  drop_na(het) %>%
+  filter(karyo != "0/1") %>%             # Get the 'others'
+  group_by(strip_title, karyo) %>%           # Group by inversion and the 'other' populations
+  group_modify(~ {
+    # Pull Pop B data for this specific inversion
+    het_data <- inv_karyo %>%
+      drop_na(het) %>%
+      filter(strip_title == .y$strip_title, karyo == "0/1") %>% 
+      pull(het)
+    
+    tidy(wilcox.test(.x$het, het_data, alternative = "less")) # less het in 0/0 & 1/1
+  }) %>%
+  ungroup() %>%
+  mutate(p.adj = p.adjust(p.value, method = "BH"))
+
+# Alternative
+labels_df <- inv_karyo_tests %>%
+  group_by(strip_title) %>%
+  mutate(y_pos = max(inv_karyo$het, na.rm = T) * 1.1) %>%
+  ungroup() %>%
+  mutate(sig_star = case_when(p.adj < 0.001 ~ "***",
+                              p.adj < 0.01  ~ "**",
+                              p.adj < 0.05  ~ "*",
+                              T ~ "ns"))
+
+ggplot(inv_karyo, aes(x = karyo, y = het, color = karyo)) +
+  geom_boxplot() +
+  facet_wrap(~ strip_title, nrow=3, scales = "free") +
+  geom_text(data = labels_df, 
+            aes(x = karyo, y = 0.4, label = sig_star),
+            size = 5, vjust = 0, color="black") +
+  ylim(c(0,0.45))+
+  theme_bw()
+
+# ggsave("../../figures/inversions/filter/inversion_karyotypes_boxplots_signif.jpeg", 
+#        width = 20, height = 10)
+
+rm(inv_pca_df, inv_het_df)
+```
+
+### Plot by inversion
+a) Pop PCA, b) Het PCA, c) Heterozygosity
+```{r}
+library(patchwork)
+
+for(INV in unique(inv_karyo$strip_title)){
+
+  pca_pop_plot <- ggplot(filter(inv_karyo,strip_title==INV)) +
+    geom_point(aes(x = V1, y = V2, color = Pop), alpha=0.7) +
+    scale_color_manual(name = "Populations",values=mypalette)+
+    theme_bw()+
+    labs(x="PC1", y="PC2") +
+    theme(strip.text = element_text(size=8),
+          panel.grid = element_blank())
+  
+  pca_het_plot <- ggplot(filter(inv_karyo,strip_title==INV)) +
+    geom_point(aes(x = V1, y = V2, color = rel_het),alpha=0.7) +
+    scale_color_viridis(name = "Relative\nHeterozygosity", na.value = "gray40")+
+    theme_bw()+
+    labs(x="PC1", y="PC2") +
+    theme(strip.text = element_text(size=8),
+          panel.grid = element_blank())
+  
+  pca_karyo_plot <- ggplot(filter(inv_karyo,strip_title==INV)) +
+    geom_point(aes(x = V1, y = V2, color = karyo),alpha=0.7) +
+    theme_bw()+
+    labs(x="PC1", y="PC2", color = "Inv Type") +
+    theme(legend.position="none",
+          strip.text = element_text(size=8),
+          panel.grid = element_blank())
+    
+  het_boxplot <- ggplot(filter(inv_karyo,strip_title==INV)) +
+    geom_boxplot(aes(x = karyo, y = het, color = karyo)) +
+    geom_text(data = filter(labels_df,strip_title==INV), 
+              aes(x = karyo, y = 0.4, label = sig_star),
+              size = 5, vjust = 0) +
+    ylim(c(0,0.45))+
+    labs(x = "Putative Inversion Type", y= "Heterozygosity", color = "")+
+    theme_bw()
+  
+  INVNAME=unique((filter(inv_karyo,strip_title==INV))$inversion)
+  
+  jpeg(str_c("../../figures/inversions/filter/byInv/",INVNAME,".jpeg"), units = "cm", res=300,
+       width = 22, height = 20)
+  print((pca_pop_plot + pca_karyo_plot) / (pca_het_plot + het_boxplot) + plot_annotation(title=str_c("MDS Outlier Region - ",INV)))
+  dev.off()
+}
+```
