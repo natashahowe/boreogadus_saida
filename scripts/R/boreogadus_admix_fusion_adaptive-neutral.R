@@ -45,10 +45,7 @@ pop_df <- meta_df %>% # remove everything after space
   left_join(bam_df, ., by = "sampleID") 
 
 admix_colors <- c("K1" = 'navy',"K2" = 'skyblue2',"K3" = '#2C967D',
-                  "K4" = 'violetred4',"K5" = '#FDAA5C',"K6" = 'khaki2')
-
-admix_colors <- c("K1" = 'gray30',"K2" = '#009E73',"K3" = '#56B4E9',
-                  "K4" = '#E69F00',"K5" = '#F0E442',"K6" = '#CC79A7')
+                  "K4" = '#FDAA5C',"K5" = 'violetred4',"K6" = 'khaki2')
 
 mypalette <- as.vector(color_df$Color2) # turn colors into vector
   names(mypalette) <- color_df$Pop # attach pop name to palette color

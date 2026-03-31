@@ -16,6 +16,8 @@ library(stringr)
 library(tools)
 library(tidyverse)
 library(cowplot)
+library(readxl)
+library(RColorBrewer)
 
 chr_table <- read_tsv("../../data/R/boreogadus_chromosomes.txt", 
                       col_names = T, show_col_types = F) %>%
@@ -62,9 +64,6 @@ bam_df <- bam_df %>%
 Matt shared his MDS outliers output with me. Import here.
 
 ```{r}
-library(readxl)
-library(RColorBrewer)
-
 mds_df <- read_xlsx("../../results/mds/MDS_analysis.xlsx")
 
 offsets <- mds_df %>%
@@ -181,7 +180,6 @@ invers_hoff <- read_xlsx("../../results/mds/inversion_regions_Hale_and_Hoff.xlsx
          endPos =as.numeric(endPos))
 
 inversions <- bind_rows(invers_hale,invers_hoff)
-
 ```
 
 ### PCAs
@@ -229,8 +227,10 @@ inv_pca_df <- bind_rows(inv_pca_list, .id = "inversion") %>%
   mutate(startMb = sub("s","",start) %>% as.numeric(.)/1e6,
          endMb = sub("e","",end) %>% as.numeric(.)/1e6,
          strip_title = paste('chr',chr,':',startMb,'-',endMb,'Mb'),
-         Pop = factor(Pop, levels = color_df$Pop),
-         strip_title = factor(strip_title, 
+         Pop = factor(Pop, levels = color_df$Pop))
+
+inv_pca_df <- inv_pca_df %>%
+  mutate(strip_title = factor(strip_title, 
                               levels = unique(inv_pca_df$strip_title)))
 
 inv_pca_df %>%
@@ -248,7 +248,7 @@ ggsave("../../figures/test.jpeg", plot = test, width = 20, height = 8)
 #### Remove two individuals consistently staying at 0,0 (missing data)
 ```{r}
 missingdata_inds <- inv_pca_df %>%
-  filter(strip_title==unique(inv_karyo$strip_title)[17],
+  filter(strip_title==unique(inv_pca_df$strip_title)[17],
          V1 > -0.02, V1 < 0.02) %>%
   pull(sampleID)
 
@@ -485,4 +485,20 @@ for(INV in unique(inv_karyo$strip_title)){
   print((pca_pop_plot + pca_karyo_plot) / (pca_het_plot + het_boxplot) + plot_annotation(title=str_c("MDS Outlier Region - ",INV)))
   dev.off()
 }
+```
+
+For fused chromosomes, let's check if the same individuals are grouping to the same inversions
+```{r}
+inv_karyo %>%
+  filter(chr == 3) %>%
+  # flip the pc1 0/0 and 1/1
+  mutate(karyo = case_when(strip_title!="chr 3 : 34.2 - 35.9 Mb" ~ karyo,
+                           karyo == "0/0" ~ "1/1",
+                           karyo == "1/1" ~ "0/0",
+                           T ~ karyo)) %>%
+  ggplot(aes(x = sampleID, y = 1, fill = Pop),color="gray10") +
+        geom_bar(width=1, stat = "identity") +
+        facet_grid(strip_title ~ karyo, scales = "free_x", space = "free_x") +
+        theme_bw() +
+  scale_fill_manual(values=mypalette)
 ```
