@@ -29,9 +29,9 @@ color_df <- read.delim2(COLORFILE, header = T, row.names = NULL, sep = "\t") %>%
 
 # call in bams
 bam_df <- read.table(BAMFILE, header = F) %>%
-  mutate(sampleID = basename(V1) %>% tools::file_path_sans_ext(.),
-         sampleID = gsub("_sorted",'',sampleID) %>% gsub("_downsampled",'',.),
-         sampleID = gsub("boreogadus_",'',sampleID)) %>%
+  mutate(sampleID = basename(V1) %>% tools::file_path_sans_ext(.) %>%
+           gsub("_sorted",'',.) %>% gsub("_downsampled",'',.) %>%
+           gsub("boreogadus_",'',.)) %>%
   select(sampleID)
 
 # call in some metadata
@@ -135,7 +135,7 @@ for(K in 2:4){
 pop_plot <- ggplot(admixed, aes(x = Indiv, y = Locality_text, fill = Pop)) + 
   geom_tile() + 
   facet_grid( ~ Pop, scales = "free_x", space = "free_x", switch = "x") +
-  labs(x = "Population", fill = "Population") +
+  labs(x = "Location", fill = "Location") +
   theme_minimal() + 
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
         panel.background = element_blank(), axis.line = element_blank(), 
@@ -356,7 +356,7 @@ adaptive_plots <- (adaptive_pcas | plot_spacer() | adaptive_admix_K24) +
 adaptive_plots
 
 ggsave(plot = adaptive_plots, 
-       "./figures/figure4/boreogadus_adaptive_pca-admix_K4_20260327.jpeg",
+       str_c("./figures/figure4/boreogadus_adaptive_pca-admix_K4_",format(Sys.Date(), "%Y%m%d"),".jpeg"),
        width = 15, height = 8)
 
 neutral_pcas <- (pc12[[3]] / plot_spacer() / pc12[[4]]) + plot_layout(heights = c(3, 0.1, 3))
@@ -365,14 +365,16 @@ neutral_plots <- (neutral_pcas | plot_spacer() | neutral_admix_K23) +
   plot_layout(guides = "collect", widths = c(3, 0.1, 6))
 neutral_plots
 
-ggsave(plot = neutral_plots, "./figures/figure4/boreogadus_neutral_pca-admix_K3_20250327.jpeg",
+ggsave(plot = neutral_plots, 
+       str_c("./figures/figure4/boreogadus_neutral_pca-admix_K3_",format(Sys.Date(), "%Y%m%d"),".jpeg"),
        width = 15, height = 8)
 
 neutral_plots_K4 <- (neutral_pcas | plot_spacer() | neutral_admix_K24) + 
   plot_layout(guides = "collect", widths = c(3, 0.1, 6))
 neutral_plots_K4
 
-ggsave(plot = neutral_plots_K4, "./figures/figure4/boreogadus_neutral_pca-admix_K4_20250327.jpeg",
+ggsave(plot = neutral_plots_K4, 
+       str_c("./figures/figure4/boreogadus_neutral_pca-admix_K4_",format(Sys.Date(), "%Y%m%d"),".jpeg"),
        width = 15, height = 8)
 
 # I couldnt get a good final plot to work, so moving to Inkscape and Finalizing it there

@@ -340,7 +340,7 @@ Didn't end up incorporating the MDS outliers in the new neutral SNP group becaus
 
 # Filter Neutral SNPs
 
-#### Remove Known/Suspected Inversions
+## Remove Known/Suspected Inversions
 
 Incorporated the MDS outliers Matt tested for inversions & the inversions identified in Hoff Supplemental Table 2 of the pop gen paper.
 
@@ -608,9 +608,7 @@ rm(weight_tmp)
 
 ### Remove Four Outliers
 
-I want to try to plot without those four outlier individuals that control pc1 and pc3
-I reran it again after the heterozygosity showed two individuals that must have essentially no data... 
-
+I want to try to plot without those four outlier individuals that control pc1 and pc3 I reran it again after the heterozygosity showed two individuals that must have essentially no data...
 
 ```{r}
 filtered_bam <- pca.vectors[,1:8] %>%
@@ -660,8 +658,11 @@ pca.vectors %>%
 
 ggsave(paste0(outdir,newfilename,"_PC1v2.jpg"), height = 5, width = 6)
 ```
+
 #### Final weights
+
 I never ran the weights for the removal of outliers...
+
 ```{r}
 # PC weights
 weight_tmp <- read_delim(paste0(path,newfilename,"_e",nEig,".weights"), delim=" ",

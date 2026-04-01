@@ -7,6 +7,7 @@ library(tibble)
 library(here) 
 library(viridis)
 library(stringr)
+library(tools)
 
 ### Required Input Variables ###################################################
 MAX_K = 6 # colors are hard coded for K=6 or less. Need to change if increase!!
@@ -155,7 +156,7 @@ for(NAME in runs){
             title = element_blank(),
             strip.text.x = element_text(size = 22, vjust = 0.5, hjust = 1, angle = 90),
             strip.placement = "inside", strip.background.x = element_blank()) +
-      xlab(label = "Population") +
+      xlab(label = "Location") +
       scale_fill_manual(values = mypalette)  
     
   admix_plot[-length(admix_plot)] <- lapply(admix_plot[-length(admix_plot)], 
