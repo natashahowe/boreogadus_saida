@@ -99,8 +99,8 @@ for(j in seq(length(pca.vectors.list))) {
     ggtitle(plot_title) +
     labs(x = paste0("PC1 (",round(varPC1[[j]], digits = 2),"%)"), 
          y= paste0("PC2 (",round(varPC2[[j]], digits = 2),"%)")) +
-    scale_x_continuous(expand = expansion(0.05,0.05)) +
-    scale_y_continuous(expand = expansion(0.05,0.05))
+    scale_x_continuous(expand = expansion(0.02,0.02)) +
+    scale_y_continuous(expand = expansion(0.02,0.02))
   
 }
 
@@ -137,20 +137,20 @@ for(j in seq(length(pca.vectors.list))) {
     ggtitle(paste0('Chr 5: ',start,'-',end,'Mb')) +
     labs(x = paste0("PC1 (",round(varPC1[[j]], digits = 2),"%)"), 
          y= paste0("PC2 (",round(varPC2[[j]], digits = 2),"%)")) +
-    scale_x_continuous(expand = expansion(0.05,0.05)) +
-    scale_y_continuous(expand = expansion(0.05,0.05))
+    scale_x_continuous(expand = expansion(0.02,0.02)) +
+    scale_y_continuous(expand = expansion(0.02,0.02))
   
   pc_facet[[j]] <- pca.vectors.i %>%
     filter(V1 > .01 | V1 < -.01) %>%
     ggplot(aes(x=V1, y=V2, fill = Pop)) + 
     geom_jitter(alpha = 0.7, size = 2.5, pch = 21, color = 'gray20') +
-    scale_fill_manual(values = mypalette) +
+    scale_fill_manual(name = "Location", values = mypalette) +
     facet_wrap(~ Pop,nrow=2) +
     ggtitle(paste0('Chr 5: ',start,'-',end,'Mb')) +
     labs(x = paste0("PC1 (",round(varPC1[[j]], digits = 2),"%)"), 
          y= paste0("PC2 (",round(varPC2[[j]], digits = 2),"%)")) +
-    scale_x_continuous(expand = expansion(0.05,0.05), breaks=c(-0.1,0,0.1)) +
-    scale_y_continuous(expand = expansion(0.05,0.05)) +
+    scale_x_continuous(expand = expansion(0.02,0.02), breaks=seq(-.1,.1,by=.05)) +
+    scale_y_continuous(expand = expansion(0.02,0.02)) +
     geom_vline(xintercept=0,linetype="dashed",alpha = 0.7,color="gray40")+
     theme_bw() +
     theme(legend.position = "none",
@@ -192,16 +192,16 @@ pca.variables <- pca.vectors.i %>%
   mutate(rel_het = as.character(rel_het),
          het = as.character(het)) %>%
   rename(Heterozygosity = het,
-         Location = Pop) %>%
-  pivot_longer(c(Heterozygosity,Location),
+         All_Locations = Pop) %>%
+  pivot_longer(c(Heterozygosity,All_Locations),
                names_to = "variable",
                values_to = "value")
 
-pca.variables %>%
+left_facet <- pca.variables %>%
   filter(V1 > .01 | V1 < -.01) %>%
   ggplot(aes(x=V1, y=V2)) + 
   geom_jitter(aes(fill = value), 
-              data = ~ subset(., variable == "Location"),
+              data = ~ subset(., variable == "All_Locations"),
               alpha = 0.7, size = 2.5, pch = 21, color = 'gray20',
               show.legend = F) +
   scale_fill_manual(name = "Location", values = mypalette) +
@@ -215,12 +215,17 @@ pca.variables %>%
   ggtitle(paste0('Chr 5: ',start,'-',end,'Mb')) +
   labs(x = paste0("PC1 (",round(varPC1[[j]], digits = 2),"%)"), 
        y= paste0("PC2 (",round(varPC2[[j]], digits = 2),"%)")) +
-  scale_x_continuous(expand = expansion(0.05,0.05), breaks=c(-0.1,0,0.1)) +
-  scale_y_continuous(expand = expansion(0.05,0.05)) +
+  scale_x_continuous(expand = expansion(0.02,0.02), breaks=seq(-.1,.1,by=.05)) +
+  scale_y_continuous(expand = expansion(0.02,0.02)) +
   theme_bw() +
   theme(panel.grid = element_blank())
 
 
-pc_facet[[2]] + theme(axis.text = element_blank(),
-                      axis.title = element_blank())
+right_facet <- pc_facet[[2]] + theme(plot.title = element_blank(), legend.position="right",
+                                     axis.text.y = element_blank(),axis.ticks.y = element_blank())
+
+left_facet + right_facet + guide_area() + plot_layout(widths = c(2.5,8,1), guides="collect", axis_titles = "collect")
+
+ggsave(paste0("./figures/pca/20241222/boreogadus_sex",suffix,"_byLocaleHeterozygosity.jpg"),
+       width = 14, height = 6, units = "in")
 
