@@ -105,14 +105,12 @@ pcSelection <- selection_table %>%
   scale_color_manual(values = rep(c('black', 'grey50'), 50)) +
   scale_x_continuous(breaks=seq(10, 90, 10)) +  
   facet_grid(pc~chr, scales='free', space='free_x') +
-    labs(#title = "PCAngsd Selection Scan", 
-         x = "Position (Mb)") +
+    labs(x = "Position (Mb)") +
   theme_cowplot() +
   theme(panel.spacing = unit(0.1, 'lines'),
         axis.title=element_text(size=14),
         axis.text=element_text(size=10),
         legend.position='none',
-        #text = element_text(size=10),
         axis.text.x = element_text(angle = 45),
         strip.background = element_rect(color="gray90"),
         strip.text = element_text(size=14,angle=0))
@@ -127,7 +125,7 @@ selection_table %>% filter(fdr<0.001) %>%
 Count number of outliers by fused/unfused chromosome
 ```{r}
 outliers <- selection_table %>% 
-  filter(pc=="X1",
+  filter(pc=="PC1",
          fdr<0.001) %>%
   mutate(chromType = ifelse(chr < 6, "fused","unfused")) %>%
   count(chromType)
