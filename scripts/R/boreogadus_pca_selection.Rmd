@@ -115,7 +115,7 @@ pcSelection <- selection_table %>%
         strip.background = element_rect(color="gray90"),
         strip.text = element_text(size=14,angle=0))
 
-ggsave(paste0(outdir,"boreogadus_wholegenome_pcangsd_selection_scan.jpg"), plot= pcSelection, height = 8, width = 16)
+# ggsave(paste0(outdir,"boreogadus_wholegenome_pcangsd_selection_scan.jpg"), plot= pcSelection, height = 8, width = 16)
 ```
 Count number of outliers by chromosome
 ```{r}
@@ -134,4 +134,10 @@ outliers
 
 print(paste("Percent of pc1 outliers found on fused chroms:",
 round(outliers[1,2]/sum(outliers[,2])*100, digits=1), "%"))
+
+selection_table %>% 
+  filter(pc=="PC2",
+         fdr<0.001) %>%
+  mutate(chromType = ifelse(chr < 6, "fused","unfused")) %>%
+  count(chromType)
 ```

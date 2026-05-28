@@ -23,6 +23,7 @@ meta_df <- read.delim("./data/R/region_metadata.txt", header = T)
 # read in color file
 color_df <- read.delim("./data/R/color_metadata_allpops_flip.txt", header = T)
 
+# estimates centromere locations based on Hoff et al 2024 
 centromere <- data.frame(chr = 1:5,
                          minPos = c(24,28,36,22,18.5),
                          maxPos = c(30,37,40,24,20))
