@@ -7,12 +7,14 @@ library(tibble)
 library(here) 
 library(viridis)
 library(stringr)
+library(tools)
 
 ### Required Input Variables ###################################################
 MAX_K = 6 # colors are hard coded for K=6 or less. Need to change if increase!!
 
 # Different runs
-runs <- c('wholegenome', 'fused_chroms', 'fused_adaptive_alpha0.05', 'unfused_neutral_alpha0.05','unfused_adaptive_alpha0.05', 'unfused_chroms')
+runs <- c('wholegenome', 'fused_chroms','fused_adaptive_alpha0.05',
+          'unfused_neutral_alpha0.05_e4_rmPCAngsdOutliers_rmInversions_rmchr9a','unfused_adaptive_alpha0.05', 'unfused_chroms')
 run_names <- c('Whole Genome', 'Fused: All Loci', 'Fused: Adaptive Loci', 'Unfused: Neutral Loci', 'Unfused: Adaptive Loci', 'Unfused: All Loci')
 # NAME='wholegenome'
 # NAME='fused_chroms'
@@ -33,12 +35,10 @@ color_df <- read.delim2(paste0(here(),"./data/R/color_metadata_allpops_flip.txt"
   left_join(meta_df %>% distinct(Population, Pop), by  = "Pop")
 
 BAMFILE <- "./data/R/boreogadus_filtered_downsampled_bams.txt"
-# call in bams
+
 bam_df <- read.table(BAMFILE, header = F) %>%
-  mutate(sampleID = basename(V1),
-         sampleID = gsub("_sorted.bam",'',sampleID),
-         sampleID = gsub("_sorted_downsampled.bam",'',sampleID),
-         sampleID = gsub("boreogadus_",'',sampleID)) %>%
+  mutate(sampleID = basename(file_path_sans_ext(V1))%>% 
+           gsub("boreogadus_|_downsampled|_sorted", "", .)) %>%
   select(sampleID)
 
 # call in some metadata
@@ -46,7 +46,7 @@ pop_df <- meta_df %>% # remove everything after space
   left_join(bam_df, ., by = "sampleID") 
 
 admix_colors <- c("K1" = 'navy',"K2" = 'skyblue2',"K3" = '#2C967D',
-                  "K4" = 'violetred4',"K5" = '#FDAA5C',"K6" = 'khaki2')
+                  "K4" = '#FDAA5C',"K5" = 'violetred4',"K6" = 'khaki2')
 
 mypalette <- as.vector(color_df$Color2) # turn colors into vector
   names(mypalette) <- color_df$Pop # attach pop name to palette color
@@ -156,7 +156,7 @@ for(NAME in runs){
             title = element_blank(),
             strip.text.x = element_text(size = 22, vjust = 0.5, hjust = 1, angle = 90),
             strip.placement = "inside", strip.background.x = element_blank()) +
-      xlab(label = "Population") +
+      xlab(label = "Location") +
       scale_fill_manual(values = mypalette)  
     
   admix_plot[-length(admix_plot)] <- lapply(admix_plot[-length(admix_plot)], 
@@ -206,15 +206,16 @@ for(NAME in runs){
   # deltaK
   # maxlikeK
   # plot with max likelihood mentioned
-  jpeg(paste0("./figures/admix/combine/boreogadus_",NAME,"_maxLikeK-",maxlikeK,"_20250707.jpeg"), 
+  jpeg(paste0("./figures/admix/combine/boreogadus_",NAME,"_maxLikeK-",maxlikeK,"_",format(Sys.Date(), "%Y%m%d"),".jpeg"), 
        width = 14, height = 16, res = 150, units = "in")
   print(admix_all_Ks)
   dev.off()
   
-  pdf(paste0("./figures/admix/combine/boreogadus_",NAME,"_maxLikeK-",maxlikeK,"_20250707.pdf"), 
+  pdf(paste0("./figures/admix/combine/boreogadus_",NAME,"_maxLikeK-",maxlikeK,"_",format(Sys.Date(), "%Y%m%d"),".pdf"), 
        width = 14, height = 16)
   print(admix_all_Ks)
   dev.off()
 
 }
+  
   

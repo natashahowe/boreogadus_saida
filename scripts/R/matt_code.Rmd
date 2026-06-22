@@ -7,21 +7,26 @@ editor_options:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = F)
+knitr::opts_chunk$set(echo = T, eval = F)
 ```
 
 ```{r install-packages}
 library(ggplot2)
 library(lostruct)
-library(bcftools)
 library(tidyverse)
 library(RColoBrewer) 
 ```
 
+### LD
+
 Plink command for LD
 
 ```{bash}
-./plink
+./plink --r2 inter-chr --allow-extra-chr \
+  --tfile gls/boreogadus_wholegenome_20241222 \
+  --maf 0.05 --ld-window-r2 0.3 \
+  -chr OZ177904.1 \
+  --out peaks/boreogadus_OZ177904.1_20241222
 ```
 
 Plot LD
@@ -38,6 +43,31 @@ redband_OMY05 %>%
   geom_point(aes(x=BP_A,y=BP_B,color=R2),shape=15,size=0.7)+
   scale_color_gradient(low="gray99",high="gray4")
 ```
+
+Natasha edits to ld heatmap plotting
+
+```{r}
+CHROM="OZ177908.1"
+GROUP <- "Chukchi"
+PREFIX <- paste0("boreogadus_",CHROM,"_",GROUP)
+
+matt_ld <- read.delim(paste0("./results/ld/", PREFIX,"_r2.ld"),sep="",header=F,stringsAsFactors = FALSE)
+colnames(matt_ld) <- c("BP_A","BP_B","R2")
+matt_ld <- matt_ld[order(matt_ld$R2),]
+
+ldplot <- matt_ld %>% 
+  filter(R2>=0.3) %>% 
+  ggplot(data=.)+
+  geom_point(aes(x=BP_A,y=BP_B,color=R2),shape=15,size=0.7)+
+  scale_color_gradient()
+
+# Have to select all below and run as one to properly plot in Rmd
+tiff(paste0("./figures/ld/", PREFIX,"_LD_r2_plink.tiff"), width = 14, height = 12, res = 300, units = "in", compression = "lzw")
+ldplot
+dev.off()
+```
+
+### MDS - Lostruct
 
 Running MSDS analysis on samples to take into account underlying pop
 structure and find regions of the genome that might be behaving
@@ -82,7 +112,7 @@ vcfbody <- cbind(cols,genos)
 write_tsv(vcfbody,"/Users/mchale/Desktop/charr_2.body")
 ```
 
-Then copy over body file into Misc folder on server and run
+Then copy over body file on server and run
 
 ```{bash eval=F}
 cat redbands.header charr_2.body > charr_2.vcf
@@ -97,9 +127,8 @@ and export the zipped vcf back onto the computer (Desktop)
 snps_charr <- read_vcf("/Users/mchale/Desktop/canada_2.vcf.gz") 
 ```
 
-\*NB, you will need bcftools installed on the computer and accessible by
+NB, you will need `bcftools` installed on the computer and accessible by
 R. I have this on my desktop not my laptop because of memory issues...
-to do this type
 
 ```{bash}
 Sys.setenv(PATH=paste("/Users/matthewhale/Documents/genomics_software/bcftools-1.18/",Sys.getenv("PATH"),sep=":"))
@@ -109,25 +138,22 @@ Can change the window size depending on number of markers and if RAD seq
 or WGS.
 
 ```{r}
-pcs_charr2 <- eigen_windows(snps_charr,k=2,win=20) 
+nWindows = 20
+pcs_charr2 <- eigen_windows(snps_charr,k=2,win=nWindows) 
 pcdist_charr2 <- pc_dist(pcs_charr2,npc=2)
 fit2d_canada2 <- cmdscale(pcdist_charr2,eig=TRUE,k=4)
 dim(fit2d_canada2$points)
-```
 
-```{r}
 canada_snps_VCF <- read.vcfR("/Users/mchale/Desktop/canada_2.vcf.gz")
 canada_snps_positions <- data.frame(canada_snps_VCF@fix,stringsAsFactors = FALSE)
 head(canada_snps_positions)
-```
 
-```{r}
-windows = rep(1:(dim(fit2d_canada2$points)[1]+1),each=20) # remember to change the value of "each" to match the number of windows specified above.
+windows = rep(1:(dim(fit2d_canada2$points)[1]+1),each=nWindows) 
 windows <- windows[1:dim(canada_snps_positions)[1]]
+
 canada_snps_positions$windows <- windows
 head(canada_snps_positions)
 ```
-
 
 ```{r}
 charr_canada2_chroms <- canada_snps_positions %>% 
@@ -140,16 +166,19 @@ write.table(fit2d_canada2$points,"/Users/mchale/Desktop/canada2_charr_MDS.txt")
 
 Combine window info with MDS and make cumulative bp column in excel.
 
+*NH found error in excel calcs and provides alternative to stay within R
+below.*
+
 ```{r}
 charr_canada2_MDS <- read.delim("/Users/mchale/Desktop/charr_canada2_MDS.txt",sep="\t",header=T,stringsAsFactors = FALSE)
 View(charr_canada2_MDS)
 
-charr_canada2_chroms <- charr_canada2_MDS %>% 
-  group_by(CHROM) %>% 
-  mutate(Start=min(cumulative_bp), 
-         Stop = max(cumulative_bp)) %>% 
-  select(CHROM,Start,Stop) %>% 
-  unique()
+# charr_canada2_chroms <- charr_canada2_MDS %>% 
+#   group_by(CHROM) %>% 
+#   mutate(Start= min(cumulative_bp), 
+#          Stop = max(cumulative_bp)) %>% 
+#   select(CHROM,Start,Stop) %>% 
+#   unique()
 ```
 
 make Manhatten style plots: NB, Chroms file is redbands_chroms_info.txt
@@ -157,12 +186,10 @@ make Manhatten style plots: NB, Chroms file is redbands_chroms_info.txt
 Find the outliers for each MDS:
 
 ```{r}
-out<- boxplot.stats(charr2_MDS$MDS1)$out
+out <- boxplot.stats(charr2_MDS$MDS1)$out
 out_ind <- which(charr2_MDS$MDS1 %in% c(out))
 out_ind
-```
 
-```{r}
 outliers <- charr2_MDS[out_ind,]
 View(outliers)
 
@@ -173,39 +200,147 @@ mycolors <- colorRampPalette(brewer.pal(8, "Set1"))(nb.colos)
 good idea to check to make sure number of colours corresponds to the
 number of chromosomes.
 
-this is the last step in R to make the Manhattan plot: remember to type
+This is the last step in R to make the Manhattan plot: remember to type
 "color=as.factor(Chr))" rather than what Mac has in his protocol or
 you'll get a weird error when trying to assign colors to the geom_points
 
 ```{r}
 ggplot(pinks_MDS_avg) + 
   geom_rect(data=chroms, aes(xmin=Start,xmax=Stop,
-                             ymin=min(pinks_MDS_avg$MDS4),ymax=max(pinks_MDS_avg$MDS4)),
+                             ymin=min(pinks_MDS_avg$MDS4),
+                             ymax=max(pinks_MDS_avg$MDS4)),
             fill=mycolors,alpha=0.25)+
   geom_point(data=pinks_MDS_avg,aes(x=cumulative_bp,y=MDS4,color=as.factor(Chr)),
              alpha=0.75,cex=0.5)+
-  geom_point(data=outliers4,aes(x=cumulative_bp,y=MDS4),color="black",cex=0.5)+
+  geom_point(data=outliers4,aes(x=cumulative_bp,y=MDS4),
+             color="black",cex=0.5)+
   scale_x_continuous(breaks=chroms$Stop,labels=chroms$Chr)+
   scale_color_manual(values=mycolors)+
   ylab("MDS4")+
   xlab("Sockeye Linkage group")+
   theme(legend.position = "none",
         panel.grid = element_blank(),
-        axis.text.x = element_text(angle=45,hjust=1,face="bold",size=6))
+        axis.text.x = element_text(angle=45,hjust=0.5,face="bold",size=6))
 
 ggsave("/Users/matthewhale/Dropbox/redbands_MDS4_plot.jpg",width=10,height=4)
 ```
 
+*Error is that the first position was added to the chromosome 1 position
+of all subsequent snps when it should just be the basepair position
+without any additions for chrom 1. Also, used the second to last
+position from chr1 as the counter for chr2, same for chr3.*
+
+###### NH alternative to MDS plotting - stay in R
+
+Do cumulative bp calc locally in R
+
+```{r}
+library(readxl)
+
+mds_df <- read_xlsx("../../results/mds/MDS_analysis.xlsx")
+
+# create chromosome cumulative bp offsets
+offsets <- mds_df %>%
+  mutate(CHROM=as.numeric(CHROM)) %>%
+  group_by(CHROM) %>%
+  dplyr::summarise(max_bp = max(POS, na.rm = T), 
+                   .groups = "drop") %>%
+  arrange(CHROM) %>%
+  mutate(cumulative_bp = cumsum(max_bp),
+         offset = lag(cumulative_bp, default = 0),
+         chrMid = (max_bp/2 + offset))
+
+# Join back to the main df and calculate cumulative position
+mds_cum_df <- mds_df %>%
+  left_join(offsets, by = "CHROM") %>%
+  mutate(cumPos = POS + offset) %>%
+  dplyr::select(CHROM,POS,cumPos,starts_with("MD")) %>%
+  dplyr::relocate(cumPos, .before="MDS1")
+
+out <- boxplot.stats(mds_cum_df$MDS1)$out
+out_ind <- which(mds_cum_df$MDS1 %in% c(out))
+out_ind
+
+outliers <- mds_cum_df[out_ind,]
+
+# Plotting color scheme:
+mycolors <- colorRampPalette(brewer.pal(8,"Set1"))(nrow(offsets))
+names(mycolors) <- offsets$CHROM
+
+ggplot(mds_cum_df) + 
+  # rectangles colored by chrom
+  geom_rect(data=offsets, 
+            aes(xmin=offset,xmax=cumulative_bp,
+                # ymin = -Inf, ymax = Inf, # Use -Inf/Inf instead of below
+                ymin=min(mds_cum_df$MDS1)-0.01, ymax=max(mds_cum_df$MDS1)+0.01),
+            fill=mycolors,alpha=0.25)+
+  # all mds points
+  geom_point(data=mds_cum_df,aes(x=cumPos,y=MDS1,color=as.factor(CHROM)),
+             alpha=0.75,cex=0.5)+
+  # outlier mds points
+  geom_point(data=outliers,aes(x=cumPos,y=MDS1),color="black",cex=0.5)+
+  scale_x_continuous(breaks=offsets$chrMid, 
+                     labels=offsets$CHROM,
+                     expand = c(0.002, 0.002))+
+  scale_y_continuous(expand = c(0.001, 0.001))+
+  scale_color_manual(values=mycolors)+
+  ylab("MDS1")+
+  xlab("Chromosome Number")+
+  theme_bw() +
+  theme(legend.position = "none",
+        panel.grid = element_blank(),
+        axis.text.x = element_text(face="bold",size=6))
+```
+
+Many plots at once by faceting.
+
+```{r}
+mds_outliers <- mds_cum_df %>%
+  pivot_longer(cols = starts_with("MD"),
+               names_to = "MDS",
+               values_to = "value") %>%
+  group_by(MDS) %>%
+  mutate(outlier = value %in% boxplot.stats(value)$out)
+
+faceted_plot <- ggplot(mds_outliers) + 
+  # rectangles colored by chrom
+  geom_rect(data = offsets, 
+            aes(xmin = offset, xmax = cumulative_bp,
+                ymin = -Inf, ymax = Inf, # Use -Inf/Inf to fill the whole height
+                fill = as.factor(CHROM)), 
+            alpha = 0.25, inherit.aes = FALSE)+
+  # all mds points
+  geom_point(data=mds_outliers %>% filter(outlier==F),aes(x=cumPos,y=value,color=as.factor(CHROM)),
+             alpha=0.75,cex=0.5)+
+  # outlier mds points
+  geom_point(data=mds_outliers %>% filter(outlier==T),aes(x=cumPos,y=value),color="black",cex=0.5)+
+  scale_x_continuous(breaks=offsets$chrMid,
+                     labels=offsets$CHROM,
+                     expand = c(0.002, 0.002))+
+  scale_y_continuous(expand = c(0.001, 0.001))+
+  facet_grid(rows=vars(MDS), scales="free_y")+
+  scale_color_manual(values=mycolors)+
+  scale_fill_manual(values=mycolors)+
+  theme_bw() +
+  theme(legend.position = "none",
+        panel.grid = element_blank(),
+        axis.text.x = element_text(face="bold",size=6))
+```
+
+### Heterozygosity within MDS outliers
+
 Making boxplots to summarize observed heterozygosity for candidate
 inversion regions. First, select markers in plink (tped file) that are
-in candidate region. Put through plink with the following code...
+in candidate region.
 
 ```{bash, eval=F}
-./plink --tfile Charr_Canada_LG15_group3 --allow-extra-chr --out canada_charr_LG15_HO --het
+./plink --tfile Charr_Canada_LG15_group3 --allow-extra-chr \
+  --out canada_charr_LG15_HO \
+  --het
 ```
 
 Annoyingly, PLINK counts the number of homozygotes NOT the number of
-hets, so need to do `1-(number of homs - number of SNPs)`. then,
+hets, so need to do `1-(number of homs / number of SNPs)`. then,
 categorize individuals based on genotype. I'm allowing some differences,
 but at least 70% of SNPs must show "the same" genotype for me to call
 it, in other words, at least 70% of markers must be e.g., homo for the
@@ -222,7 +357,7 @@ ggplot(data=charr_data_boxplot2) +
   ylab("average heterozygosity")+ 
   xlab("inversion type")
 
-ggsave ("/Users/matthewhale/Documents/lG15_Nunavut_charr_Het_boxplot.jpg",width =5, height = 3)
+ggsave("/Users/matthewhale/Documents/lG15_Nunavut_charr_Het_boxplot.jpg",width =5, height = 3)
 ```
 
 admixture analysis
@@ -230,7 +365,7 @@ admixture analysis
 PCA on candidate CI region with samples colored by population
 
 ```{r}
-cod_colors <- read.delim("/Users/matthewhale/Dropbox/Arctic_cod/color_metadata_allpops.txt",header=T,sep="\t")
+cod_colors <- read.delim("/Users/matthewhale/Dropbox/Arctic_cod/color_metadata_allpops.txt", header=T, sep="\t")
 
 ggplot(data=cod_non_outliers,aes(x=PC2,y=PC3,color=Population))+
   geom_point(alpha=1)+
