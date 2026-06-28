@@ -17,6 +17,8 @@ library(tidyverse)
 
 EXPLANATION OF PRIOR WORK
 
+This pipeline has been moved here, but not yet fully filled out for the arctic cod project.
+
 ### OUT OF ORDER WORK
 
 LD Pruning:
